@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#F9FAFB">
+<title>Devameer Bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><ellipse cx='32' cy='36' rx='24' ry='22' fill='%23fff' stroke='%23000' stroke-width='3'/><ellipse cx='28' cy='32' rx='3' ry='6' fill='%23000'/><ellipse cx='40' cy='30' rx='3' ry='6' fill='%23000'/></svg>">
+</head>
+<body>
+<div id="island" class="island"><span class="isl-ic"></span><span class="isl-t"></span><span class="isl-v"></span></div>
+<div id="banners"></div>
+<canvas id="confetti"></canvas>
+
+<!-- login -->
+<section id="login" class="login hidden">
+  <div class="login-card">
+    <div class="bean-sm" data-bean></div>
+    <h1 id="loginTitle">Devameer Bot</h1>
+    <div class="badge">DEVAMEER TERMINAL</div>
+    <form id="loginForm"><input id="pw" type="password" placeholder="Admin password" autocomplete="current-password" required><button class="pill dark" type="submit">Unlock</button></form>
+    <div id="loginErr" class="err"></div>
+  </div>
+</section>
+
+<main id="app" class="app hidden">
+  <!-- HOME -->
+  <section class="tab" data-tab="home">
+    <div class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="title"><span id="botName">Devameer Bot</span><span id="modeTag" class="mode-tag">PAPER</span></div>
+          <div class="badge" id="badge">DEVAMEER TERMINAL</div>
+        </div>
+        <button id="liveBtn" class="live off" title="Start / stop"><i></i><span>PAUSED</span></button>
+      </div>
+      <div class="bean" data-bean></div>
+      <div class="profit">
+        <div class="lbl">PROFIT</div>
+        <div id="profitUsd" class="big">$0</div>
+        <div id="profitSol" class="sol">+0.0000 SOL</div>
+        <div class="row"><span id="mult" class="mult">1.00x</span><span id="tradesLine" class="muted">0 trades · 0% win</span></div>
+        <div class="goal"><div class="goal-l"><span id="goalLbl">goal 5x</span></div><div class="bar"><div id="goalBar"></div></div></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><b>Profit by agent</b><span class="muted" id="agentsLine">runs 4 agents</span></div>
+      <div class="seg" id="seg"></div>
+      <div class="agents" id="agents"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><b>Closed trades</b><span class="muted" id="totalLine">0 total</span></div>
+      <div id="openWrap" class="hidden"><div class="mini-h">Open now</div><div class="grid" id="openGrid"></div></div>
+      <div class="grid" id="grid"></div>
+      <div id="empty" class="empty">
+        <div class="bean-xs" data-bean></div>
+        <div><b>No trades yet</b><br><span id="emptyText">Tap PAUSED to start. Agents only buy when a live pump.fun token passes every rule.</span></div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+  </section>
+
+  <!-- TRADES -->
+  <section class="tab hidden" data-tab="trades">
+    <h2 class="page-h">Trades</h2>
+    <div class="list" id="tradeList"></div>
+    <div class="spacer"></div>
+  </section>
+
+  <!-- CHAT (full terminal) -->
+  <section class="tab hidden" data-tab="chat">
+    <h2 class="page-h">Terminal</h2>
+    <div class="term full"><div class="term-h"><div class="av" data-bean></div><div><b class="tn">Devameer Bot</b><div class="muted sm">typing in DEVAMEER</div></div></div><div class="lines" id="fullLog"></div></div>
+    <div class="spacer"></div>
+  </section>
+
+  <!-- ME -->
+  <section class="tab hidden" data-tab="me">
+    <h2 class="page-h">Me</h2>
+    <div class="card" id="statusCard"></div>
+    <div class="card">
+      <div class="card-h">Controls</div>
+      <div class="btns">
+        <button class="pill dark" id="startBtn">Start</button>
+        <button class="pill" id="stopBtn">Pause</button>
+        <button class="pill red" id="stopSellBtn">Stop &amp; sell all</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h">Settings <span class="muted sm">(capped by server limits)</span></div>
+      <label>Trade size (SOL) <input id="sSize" type="number" step="0.001" min="0.001"></label>
+      <label>Slippage % <input id="sSlip" type="number" step="1" min="1"></label>
+      <label>Priority fee (SOL) <input id="sFee" type="number" step="0.0001" min="0"></label>
+      <label>Goal multiple <input id="sGoal" type="number" step="0.5" min="1.1"></label>
+      <div class="agent-toggles" id="agentToggles"></div>
+      <button class="pill dark" id="saveBtn">Save settings</button>
+    </div>
+    <div class="card" id="limitsCard"></div>
+    <div class="card" id="rulesCard"></div>
+    <div class="card"><div class="btns"><button class="pill" id="resetBtn">Reset paper stats</button><button class="pill" id="logoutBtn">Log out</button></div></div>
+    <div class="spacer"></div>
+  </section>
+
+  <!-- floating terminal -->
+  <div class="term float" id="floatTerm">
+    <div class="term-h"><div class="av" data-bean></div><div><b class="tn">Devameer Bot</b><div class="muted sm">typing in DEVAMEER</div></div></div>
+    <div class="lines" id="log"></div>
+  </div>
+
+  <nav class="nav">
+    <button data-go="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+    <button data-go="trades"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Trades</button>
+    <button id="wdBtn" class="wd">WITHDRAW</button>
+    <button data-go="chat"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg>Chat</button>
+    <button data-go="me"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></svg>Me</button>
+  </nav>
+</main>
+
+<!-- withdraw dialog -->
+<div id="dlg" class="dlg hidden">
+  <div class="dlg-card">
+    <h3>Withdraw to Phantom</h3>
+    <div class="muted sm" id="dlgTo"></div>
+    <label>Amount (SOL) <input id="wdAmt" type="number" step="0.0001" min="0"></label>
+    <div class="muted sm" id="dlgNote"></div>
+    <div class="btns"><button class="pill" id="dlgCancel">Cancel</button><button class="pill orange" id="dlgOk">Confirm withdraw</button></div>
+    <div class="err" id="dlgErr"></div>
+  </div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

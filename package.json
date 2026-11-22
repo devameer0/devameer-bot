@@ -1,0 +1,26 @@
+{
+  "name": "devameer-bot",
+  "version": "1.0.0",
+  "description": "Devameer Bot - pump.fun trading terminal (paper by default)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@solana/web3.js": "^3.2.1",
+    "better-sqlite3": "^13.2.0",
+    "bs58": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "express": "^5.3.0",
+    "pg": "^8.23.1",
+    "ws": "^8.23.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
+}
