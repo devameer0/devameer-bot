@@ -99,8 +99,9 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
     res.json({ mint, ticks: data, stats: hist });
   });
 
-  share.mount(app, { engine, ticks });
+  // Register replay MP4 routes before /share/trade/:id so :id.mp4 is not swallowed.
   replay.mount(app, { engine, ticks, share, requireAdmin, requireRead });
+  share.mount(app, { engine, ticks });
 
   app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
   app.listen(cfg.PORT, () => console.log(`${cfg.BOT_NAME} on :${cfg.PORT} · mode ${engine.mode} · db ${store.get().kind} · dryRun=${cfg.DRY_RUN} · key=${trader.kp ? 'loaded' : 'none'}`));
