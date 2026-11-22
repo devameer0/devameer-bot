@@ -18,6 +18,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   await store.init();
   const market = new Market();
   const trader = new Trader(market);
+  await trader.init();
   const engine = new Engine(market, trader);
   await engine.init();
   market.start();

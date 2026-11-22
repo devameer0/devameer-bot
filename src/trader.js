@@ -9,12 +9,13 @@ const mkConn = () => new Connection(cfg.SOLANA_RPC_URL, { commitment: 'confirmed
 
 
 let keypair = null;
-function loadKey() {
+async function loadKey() {
   if (keypair || !process.env.WALLET_PRIVATE_KEY) return keypair;
   try {
     const raw = process.env.WALLET_PRIVATE_KEY.trim();
     const bytes = raw.startsWith('[') ? Uint8Array.from(JSON.parse(raw)) : bs58.decode(raw);
-    keypair = Keypair.fromSecretKey(bytes);
+    const ret = Keypair.fromSecretKey(bytes);
+    keypair = (ret && typeof ret.then === 'function') ? await ret : ret;
   } catch { keypair = null; console.error('WALLET_PRIVATE_KEY could not be parsed (expected base58 or JSON byte array)'); }
   return keypair;
 }
@@ -23,14 +24,15 @@ class Trader {
   constructor(market) {
     this.market = market;
     this.conn = mkConn();
-    this.kp = loadKey();
+    this.kp = null;
   }
+  async init() { this.kp = await loadKey(); }
   get pubkey() { return this.kp ? this.kp.publicKey.toBase58() : null; }
   get live() { return cfg.LIVE_CAPABLE && !!this.kp; }
 
   async balanceSol() {
     if (!this.kp) return null;
-    try { return (await this.conn.getBalance(this.kp.publicKey)) / LAMPORTS_PER_SOL; } catch { return null; }
+    try { return Number(await this.conn.getBalance(this.kp.publicKey)) / Number(LAMPORTS_PER_SOL); } catch { return null; }
   }
 
   // ----- paper fill math (constant product on the live curve reserves) -----
@@ -76,7 +78,7 @@ class Trader {
       if (tx?.meta) {
         const keys = tx.transaction.message.getAccountKeys ? tx.transaction.message.getAccountKeys({ accountKeysFromLookups: tx.meta.loadedAddresses }).staticAccountKeys : tx.transaction.message.accountKeys;
         const idx = keys.findIndex(k => k.toBase58() === this.pubkey);
-        const solDelta = idx >= 0 ? (tx.meta.postBalances[idx] - tx.meta.preBalances[idx]) / LAMPORTS_PER_SOL : 0;
+        const solDelta = idx >= 0 ? (Number(tx.meta.postBalances[idx]) - Number(tx.meta.preBalances[idx])) / Number(LAMPORTS_PER_SOL) : 0;
         const bal = (arr) => (arr || []).filter(b => b.mint === mint && b.owner === this.pubkey).reduce((s, b) => s + (b.uiTokenAmount.uiAmount || 0), 0);
         return { solDelta, tokenDelta: bal(tx.meta.postTokenBalances) - bal(tx.meta.preTokenBalances) };
       }
