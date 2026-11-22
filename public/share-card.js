@@ -135,57 +135,129 @@
       <text x="100" y="190" text-anchor="middle" font-size="36" font-weight="800" fill="#fff">${letter}</text>`;
   }
 
+  function parseHide(hide) {
+    const set = new Set(String(hide || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean));
+    return { hideProfit: set.has('profit'), hideInvested: set.has('invested') };
+  }
+  function hideParam(d) {
+    const a = [];
+    if (d.hideProfit) a.push('profit');
+    if (d.hideInvested) a.push('invested');
+    return a.join(',');
+  }
+  function flagsOf(d) {
+    if (d && (d.hideProfit || d.hideInvested || d.hide)) {
+      const p = d.hide ? parseHide(d.hide) : {};
+      return { hideProfit: !!(d.hideProfit || p.hideProfit), hideInvested: !!(d.hideInvested || p.hideInvested), showChart: d.showChart !== false };
+    }
+    return { hideProfit: false, hideInvested: false, showChart: d ? d.showChart !== false : true };
+  }
+
+  function priceChart(ticks, opts, T) {
+    const { x, y, w, h, entryAt, exitAt, entryPrice, exitPrice } = opts || {};
+    if (!ticks || ticks.length < 2) return '';
+    const ys = ticks.map((p) => p.price);
+    const min = Math.min(...ys), max = Math.max(...ys), span = max - min || min * 0.01 || 1;
+    const t0 = ticks[0].t, t1 = ticks[ticks.length - 1].t, ts = t1 - t0 || 1;
+    const xy = (p) => [x + ((p.t - t0) / ts) * w, y + h - ((p.price - min) / span) * h];
+    const coords = ticks.map(xy);
+    const d = coords.map((c, i) => (i ? 'L' : 'M') + c[0].toFixed(1) + ',' + c[1].toFixed(1)).join(' ');
+    const last = coords[coords.length - 1];
+    const firstP = ticks[0].price;
+    const peak = Math.max(...ys), trough = Math.min(...ys);
+    const pump = firstP ? peak / firstP - 1 : 0;
+    const dump = firstP ? trough / firstP - 1 : 0;
+    const accent = (ticks[ticks.length - 1].price >= firstP) ? T.green : T.red;
+    const area = d + ` L${last[0].toFixed(1)},${(y + h).toFixed(1)} L${coords[0][0].toFixed(1)},${(y + h).toFixed(1)} Z`;
+    const mark = (at, price, color, label) => {
+      if (at == null || at < t0 || at > t1) return '';
+      const px = x + ((at - t0) / ts) * w;
+      const py = price != null ? (y + h - ((price - min) / span) * h) : y + h / 2;
+      return `<line x1="${px.toFixed(1)}" x2="${px.toFixed(1)}" y1="${y}" y2="${y + h}" stroke="${color}" stroke-dasharray="4 4" stroke-width="1.4" opacity=".85"/>
+        <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="5" fill="${color}" stroke="${T.bg}" stroke-width="2"/>
+        <text x="${px.toFixed(1)}" y="${y - 6}" text-anchor="middle" font-size="10" font-weight="700" fill="${color}">${esc(label)}</text>`;
+    };
+    const peakPt = ticks.find((p) => p.price === peak);
+    const troughPt = ticks.find((p) => p.price === trough);
+    const tag = (p, text, color, above) => {
+      if (!p) return '';
+      const [px, py] = xy(p);
+      return `<text x="${Math.min(Math.max(px, x + 20), x + w - 20).toFixed(1)}" y="${(above ? py - 8 : py + 14).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="800" fill="${color}">${esc(text)}</text>`;
+    };
+    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="14" fill="${T.panel}" stroke="${T.line}"/>
+      <path d="${area}" fill="${accent}" fill-opacity="0.12"/>
+      <path d="${d}" fill="none" stroke="${accent}" stroke-width="2.8" stroke-linejoin="round" stroke-linecap="round"/>
+      ${mark(entryAt, entryPrice, T.orange, 'IN')}
+      ${mark(exitAt, exitPrice, accent, 'OUT')}
+      ${tag(peakPt, '↑' + Math.abs(pump * 100).toFixed(Math.abs(pump * 100) >= 10 ? 0 : 1) + '%', T.green, true)}
+      ${tag(troughPt, '↓' + Math.abs(dump * 100).toFixed(Math.abs(dump * 100) >= 10 ? 0 : 1) + '%', T.red, false)}
+      <circle cx="${last[0]}" cy="${last[1]}" r="4.5" fill="${accent}"/>`;
+  }
+
   function tradeSvg(d, theme) {
     const T = THEMES[theme === 'light' ? 'light' : 'dark'];
-    const win = (d.pnlSol || 0) >= 0;
+    const F = flagsOf(d);
+    const win = (d.pnlSol || 0) >= 0 || (d.pnlPct || 0) >= 0;
     const accent = win ? T.green : T.red;
     const paper = !!d.paper;
     const open = d.status === 'open';
     let bx = 1160;
     const badges = [];
+    if (F.hideProfit || F.hideInvested) { const t = F.hideProfit && F.hideInvested ? 'HIDDEN' : (F.hideProfit ? 'P&L HIDDEN' : 'SIZE HIDDEN'); const w = 18 + t.length * 8.4; bx -= w; badges.push(badge(bx, 48, t, T.panel, T.mut)); bx -= 10; }
     if (open) { const t = 'OPEN'; const w = 18 + t.length * 9.2; bx -= w; badges.push(badge(bx, 48, t, T.openBg, T.openFg)); bx -= 10; }
     { const t = paper ? 'PAPER' : 'LIVE'; const w = 18 + t.length * 9.2; bx -= w; badges.push(badge(bx, 48, t, paper ? T.paperBg : T.liveBg, paper ? T.paperFg : T.liveFg)); }
     const name = d.name || tick(d.symbol);
     const agent = d.agentName || d.agent || '';
-    const usdLine = d.solUsd ? fmtUsd(d.pnlUsd != null ? d.pnlUsd : d.pnlSol * d.solUsd) : fmtSol(d.pnlSol);
-    const solLine = d.solUsd ? fmtSol(d.pnlSol) : '';
+    const pctLine = fmtPct(d.pnlPct);
+    const usdLine = F.hideProfit ? pctLine : (d.solUsd && d.pnlUsd != null ? fmtUsd(d.pnlUsd) : (d.solUsd ? fmtUsd((d.pnlSol || 0) * d.solUsd) : fmtSol(d.pnlSol)));
+    const solLine = F.hideProfit ? '' : (d.solUsd && d.pnlSol != null ? fmtSol(d.pnlSol) : '');
+    const hidden = 'Hidden';
     const stats = [
-      ['IN', fmtSol(d.costSol, false)],
-      ['OUT', fmtSol(d.proceedsSol, false)],
+      ['IN', F.hideInvested ? hidden : fmtSol(d.costSol, false)],
+      ['OUT', F.hideInvested ? hidden : fmtSol(d.proceedsSol, false)],
       ['ENTRY MCAP', fmtMcap(d.entryMcapSol, d.solUsd)],
       ['EXIT MCAP', (open && fmtMcap(d.exitMcapSol, d.solUsd) !== '—' ? fmtMcap(d.exitMcapSol, d.solUsd) + ' now' : fmtMcap(d.exitMcapSol, d.solUsd))],
       ['HOLD', fmtHold(d.holdMs)],
     ];
-    const sw = 210, sx0 = 56, sy = 430;
+    const showChart = F.showChart && d.ticks && d.ticks.length > 1;
+    const sw = showChart ? 210 : 210, sx0 = 56, sy = showChart ? 448 : 430;
     const cells = stats.map((s, i) => {
       const x = sx0 + i * (sw + 12);
-      return `<rect x="${x}" y="${sy}" width="${sw}" height="86" rx="16" fill="${T.panel}" stroke="${T.line}"/>
-        <text x="${x + 16}" y="${sy + 28}" font-size="11" font-weight="700" letter-spacing="1" fill="${T.dim}">${s[0]}</text>
-        <text x="${x + 16}" y="${sy + 60}" font-size="20" font-weight="800" fill="${T.text}">${esc(s[1])}</text>`;
+      return `<rect x="${x}" y="${sy}" width="${sw}" height="${showChart ? 78 : 86}" rx="16" fill="${T.panel}" stroke="${T.line}"/>
+        <text x="${x + 16}" y="${sy + 26}" font-size="11" font-weight="700" letter-spacing="1" fill="${T.dim}">${s[0]}</text>
+        <text x="${x + 16}" y="${sy + (showChart ? 54 : 60)}" font-size="20" font-weight="800" fill="${T.text}">${esc(s[1])}</text>`;
     }).join('');
     const foot = [fmtDate(open ? d.openedAt : (d.closedAt || d.openedAt)), d.exitReason, agent && !d.exitReason ? agent : null].filter(Boolean).join('  ·  ');
+    const holdNote = (d.holdPumpPct != null || d.holdDumpPct != null)
+      ? `trade  ↑${Math.abs((d.holdPumpPct || 0) * 100).toFixed(0)}%  ↓${Math.abs((d.holdDumpPct || 0) * 100).toFixed(0)}%`
+      : '';
+    const chart = showChart ? priceChart(d.ticks, { x: 620, y: 128, w: 524, h: 280, entryAt: d.openedAt, exitAt: d.closedAt || (open ? Date.now() : null), entryPrice: d.entryPrice || d.curvePriceAtEntry, exitPrice: d.exitPrice }, T) : '';
+    const numX = 56;
     const inner = `
       ${header(T, d, badges.join(''))}
       ${tokenAvatar(d, T)}
       <text x="164" y="174" font-size="34" font-weight="800" fill="${T.text}">${esc(tick(d.symbol))}</text>
       <text x="164" y="206" font-size="16" font-weight="500" fill="${T.mut}">${esc(name === tick(d.symbol) ? '' : name)}${name && name !== tick(d.symbol) && agent ? ' · ' : ''}${esc(agent)}</text>
-      <text x="56" y="310" font-size="84" font-weight="900" fill="${accent}" letter-spacing="-2">${esc(usdLine)}</text>
-      <text x="56" y="356" font-size="22" font-weight="700" fill="${T.mut}">${esc(solLine)}${solLine ? '   ' : ''}<tspan fill="${accent}">${esc(fmtPct(d.pnlPct))}</tspan></text>
+      <text x="${numX}" y="${showChart ? 300 : 310}" font-size="${showChart ? 64 : 84}" font-weight="900" fill="${accent}" letter-spacing="-2">${esc(usdLine)}</text>
+      <text x="${numX}" y="${showChart ? 340 : 356}" font-size="22" font-weight="700" fill="${T.mut}">${esc(solLine)}${!F.hideProfit && solLine ? '   ' : ''}${F.hideProfit ? '' : '<tspan fill="' + accent + '">' + esc(pctLine) + '</tspan>'}${holdNote && showChart ? '' : ''}</text>
+      ${chart}
       ${cells}
-      <text x="56" y="556" font-size="14" font-weight="500" fill="${T.dim}">${esc(foot)}</text>
+      <text x="56" y="556" font-size="14" font-weight="500" fill="${T.dim}">${esc(foot)}${holdNote ? '  ·  ' + esc(holdNote) : ''}</text>
       <text x="1144" y="594" text-anchor="end" font-size="12" font-weight="600" fill="${T.dim}">devameer-bot</text>`;
     return wrap(T, inner);
   }
 
-  function spark(points, x, y, w, h, T, accent) {
+  function spark(points, x, y, w, h, T, accent, key) {
+    key = key || 'pnl';
     if (!points || points.length < 1) return '';
-    const ys = points.map((p) => p.pnl);
+    const ys = points.map((p) => p[key] != null ? p[key] : (p.pct != null ? p.pct : 0));
     const min = Math.min(0, ...ys), max = Math.max(0, ...ys);
     const span = max - min || 1;
     const n = Math.max(points.length - 1, 1);
     const coords = points.map((p, i) => {
+      const v = p[key] != null ? p[key] : (p.pct != null ? p.pct : 0);
       const px = x + (i / n) * w;
-      const py = y + h - ((p.pnl - min) / span) * h;
+      const py = y + h - ((v - min) / span) * h;
       return [px, py];
     });
     if (coords.length === 1) coords.unshift([x, y + h - ((0 - min) / span) * h]);
@@ -201,17 +273,20 @@
 
   function accountSvg(d, theme) {
     const T = THEMES[theme === 'light' ? 'light' : 'dark'];
-    const win = (d.pnlSol || 0) >= 0;
+    const F = flagsOf(d);
+    const win = (d.pnlSol || 0) >= 0 || (d.pnlPct || 0) >= 0;
     const accent = win ? T.green : T.red;
     const paper = !!d.paper;
     let bx = 1160;
     const badges = [];
+    if (F.hideProfit || F.hideInvested) { const t = F.hideProfit && F.hideInvested ? 'HIDDEN' : (F.hideProfit ? 'P&L HIDDEN' : 'SIZE HIDDEN'); const w = 18 + t.length * 8.4; bx -= w; badges.push(badge(bx, 48, t, T.panel, T.mut)); bx -= 10; }
     { const t = d.label || 'ALL TIME'; const w = 18 + t.length * 9.2; bx -= w; badges.push(badge(bx, 48, t, T.panel, T.text)); bx -= 10; }
     { const t = paper ? 'PAPER' : 'LIVE'; const w = 18 + t.length * 9.2; bx -= w; badges.push(badge(bx, 48, t, paper ? T.paperBg : T.liveBg, paper ? T.paperFg : T.liveFg)); }
-    const usdLine = d.solUsd ? fmtUsd(d.pnlUsd != null ? d.pnlUsd : d.pnlSol * d.solUsd) : fmtSol(d.pnlSol);
-    const solLine = d.solUsd ? fmtSol(d.pnlSol) : '';
-    const best = d.best ? `${tick(d.best.symbol)} ${fmtSol(d.best.pnlSol)}` : '—';
-    const worst = d.worst ? `${tick(d.worst.symbol)} ${fmtSol(d.worst.pnlSol)}` : '—';
+    const pct = d.pnlPct != null ? (d.pnlPct < 0 ? '−' : '+') + Math.abs(d.pnlPct * 100).toFixed(1) + '%' : '';
+    const usdLine = F.hideProfit ? (pct || '—') : (d.solUsd ? fmtUsd(d.pnlUsd != null ? d.pnlUsd : d.pnlSol * d.solUsd) : fmtSol(d.pnlSol));
+    const solLine = F.hideProfit ? '' : (d.solUsd ? fmtSol(d.pnlSol) : '');
+    const best = d.best ? (tick(d.best.symbol) + (F.hideProfit ? (d.best.pnlPct != null ? ' ' + fmtPct(d.best.pnlPct) : '') : ' ' + fmtSol(d.best.pnlSol))) : '—';
+    const worst = d.worst ? (tick(d.worst.symbol) + (F.hideProfit ? (d.worst.pnlPct != null ? ' ' + fmtPct(d.worst.pnlPct) : '') : ' ' + fmtSol(d.worst.pnlSol))) : '—';
     const stats = [
       ['TRADES', String(d.trades || 0)],
       ['WIN RATE', d.trades ? Math.round((d.winRate || 0) * 100) + '%' : '—'],
@@ -226,30 +301,31 @@
         <text x="${x + 16}" y="${sy + 28}" font-size="11" font-weight="700" letter-spacing="1" fill="${T.dim}">${s[0]}</text>
         <text x="${x + 16}" y="${sy + 60}" font-size="20" font-weight="800" fill="${color}">${esc(s[1])}</text>`;
     }).join('');
-    const pct = d.pnlPct != null ? (d.pnlPct < 0 ? '−' : '+') + Math.abs(d.pnlPct * 100).toFixed(1) + '%' : '';
+    const curveKey = (d.curve && d.curve[0] && d.curve[0].pct != null && d.curve[0].pnl == null) ? 'pct' : 'pnl';
     const inner = `
       ${header(T, d, badges.join(''))}
-      <text x="56" y="168" font-size="13" font-weight="700" letter-spacing="1.4" fill="${T.dim}">${esc((d.label || 'ALL TIME') + ' PNL')}</text>
+      <text x="56" y="168" font-size="13" font-weight="700" letter-spacing="1.4" fill="${T.dim}">${esc((d.label || 'ALL TIME') + (F.hideProfit ? ' RETURN' : ' PNL'))}</text>
       <text x="56" y="250" font-size="76" font-weight="900" fill="${accent}" letter-spacing="-2">${esc(usdLine)}</text>
-      <text x="56" y="292" font-size="20" font-weight="700" fill="${T.mut}">${esc(solLine)}${solLine && pct ? '   ·   ' : ''}${esc(pct)}</text>
-      ${spark(d.curve, 620, 140, 524, 280, T, accent)}
+      <text x="56" y="292" font-size="20" font-weight="700" fill="${T.mut}">${esc(solLine)}${!F.hideProfit && solLine && pct ? '   ·   ' + esc(pct) : ''}</text>
+      ${spark(d.curve, 620, 140, 524, 280, T, accent, curveKey)}
       ${cells}
       <text x="1144" y="594" text-anchor="end" font-size="12" font-weight="600" fill="${T.dim}">devameer-bot</text>`;
     return wrap(T, inner);
   }
 
   function tweetText(d, url) {
+    const F = flagsOf(d);
     if (d.kind === 'account') {
-      const usd = d.solUsd ? fmtUsd(d.pnlUsd != null ? d.pnlUsd : d.pnlSol * d.solUsd) + '  ·  ' : '';
-      const pct = d.pnlPct != null ? ' (' + (d.pnlPct < 0 ? '−' : '+') + Math.abs(d.pnlPct * 100).toFixed(1) + '%)' : '';
-      return `Devameer Bot ${d.label || 'All-time'} PnL  ${usd}${fmtSol(d.pnlSol)}${pct}\n${d.trades || 0} trades · ${d.trades ? Math.round((d.winRate || 0) * 100) + '% win' : 'no trades yet'}${d.best ? ' · Best ' + tick(d.best.symbol) : ''}${d.paper ? ' · PAPER' : ''}\n${HANDLE}${url ? '\n' + url : ''}`;
+      const amt = F.hideProfit ? '' : ((d.solUsd && !F.hideProfit ? fmtUsd(d.pnlUsd != null ? d.pnlUsd : d.pnlSol * d.solUsd) + '  ·  ' : '') + fmtSol(d.pnlSol));
+      const pct = d.pnlPct != null ? (F.hideProfit ? ((d.pnlPct < 0 ? '−' : '+') + Math.abs(d.pnlPct * 100).toFixed(1) + '%') : ' (' + (d.pnlPct < 0 ? '−' : '+') + Math.abs(d.pnlPct * 100).toFixed(1) + '%)') : '';
+      return `Devameer Bot ${d.label || 'All-time'} ${F.hideProfit ? 'return' : 'PnL'}  ${amt}${pct}\n${d.trades || 0} trades · ${d.trades ? Math.round((d.winRate || 0) * 100) + '% win' : 'no trades yet'}${d.best ? ' · Best ' + tick(d.best.symbol) : ''}${d.paper ? ' · PAPER' : ''}\n${HANDLE}${url ? '\n' + url : ''}`.replace(/  +/g, ' ');
     }
-    const usd = d.solUsd ? fmtUsd(d.pnlUsd != null ? d.pnlUsd : d.pnlSol * d.solUsd) : '';
-    return `${tick(d.symbol)}  ${fmtPct(d.pnlPct)}  ·  ${fmtSol(d.pnlSol)}${usd ? ' (' + usd + ')' : ''}\n${d.agentName || ''}${d.holdMs != null ? ' · held ' + fmtHold(d.holdMs) : ''}${d.paper ? ' · PAPER' : ''}\n${HANDLE}${url ? '\n' + url : ''}`;
+    const amt = F.hideProfit ? '' : (`  ·  ${fmtSol(d.pnlSol)}` + (d.solUsd ? ' (' + fmtUsd(d.pnlUsd != null ? d.pnlUsd : d.pnlSol * d.solUsd) + ')' : ''));
+    return `${tick(d.symbol)}  ${fmtPct(d.pnlPct)}${amt}\n${d.agentName || ''}${d.holdMs != null ? ' · held ' + fmtHold(d.holdMs) : ''}${d.paper ? ' · PAPER' : ''}\n${HANDLE}${url ? '\n' + url : ''}`;
   }
 
   return {
     W, H, THEMES, HANDLE, esc, fmtUsd, fmtSol, fmtPct, fmtHold, fmtDate, fmtMcap, fmtPrice, tick,
-    tradeSvg, accountSvg, tweetText, spark,
+    tradeSvg, accountSvg, tweetText, spark, priceChart, parseHide, hideParam, flagsOf,
   };
 });

@@ -87,6 +87,12 @@
         <div><b>No trades yet</b><br><span id="emptyText">Tap PAUSED to start. Agents only buy when a live pump.fun token passes every rule.</span></div>
       </div>
     </div>
+
+    <div class="sec" id="histSec">
+      <div class="sec-h"><b>Coin history</b><span class="muted" id="histLine">pump &amp; dump since first seen</span></div>
+      <div class="hist" id="histList"></div>
+      <div id="histEmpty" class="muted sm" style="padding:4px 2px">No coin history yet. Ticks are recorded for watched and traded coins.</div>
+    </div>
     <div class="spacer"></div>
   </section>
 
@@ -162,10 +168,16 @@
   <div class="share-sheet">
     <div class="share-toolbar">
       <h3 id="shareTitle">Share PnL</h3>
-      <div class="btns" style="margin:0">
-        <button type="button" class="pill" id="shareTheme">Light card</button>
-        <button type="button" class="pill" id="shareClose">Close</button>
-      </div>
+      <button type="button" class="pill" id="shareClose">Close</button>
+    </div>
+    <div class="theme-switch" id="shareThemeSwitch">
+      <button type="button" data-card-theme="dark">Dark</button>
+      <button type="button" data-card-theme="light">Light</button>
+    </div>
+    <div class="share-toggles">
+      <label><input type="checkbox" id="hideProfit"> Hide profit</label>
+      <label><input type="checkbox" id="hideInvested"> Hide invested</label>
+      <label id="showChartWrap"><input type="checkbox" id="showChart" checked> Show chart</label>
     </div>
     <div class="share-card-wrap" id="shareCardWrap"></div>
     <div class="share-actions">
@@ -175,6 +187,19 @@
       <button type="button" class="pill" id="shareLink">Copy link</button>
     </div>
     <div class="share-msg" id="shareMsg"></div>
+  </div>
+</div>
+<div id="chartDlg" class="dlg hidden">
+  <div class="share-sheet chart-sheet">
+    <div class="share-toolbar">
+      <h3 id="chartTitle">Coin chart</h3>
+      <div class="btns" style="margin:0">
+        <button type="button" class="pill orange" id="chartShare">Share</button>
+        <button type="button" class="pill" id="chartClose">Close</button>
+      </div>
+    </div>
+    <div id="chartMeta" class="chart-meta"></div>
+    <div class="chart-wrap" id="chartWrap"></div>
   </div>
 </div>
 <script src="/share-card.js"></script>

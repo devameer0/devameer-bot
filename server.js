@@ -8,6 +8,7 @@ const { Market } = require('./src/market');
 const { Trader } = require('./src/trader');
 const { Engine, AGENTS } = require('./src/engine');
 const share = require('./src/share');
+const ticks = require('./src/ticks');
 
 const SECRET = cfg.SESSION_SECRET || crypto.createHash('sha256').update('devameer-bot:' + (cfg.ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex'))).digest('hex');
 const sign = (v) => v + '.' + crypto.createHmac('sha256', SECRET).update(v).digest('hex');
@@ -21,6 +22,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   await trader.init();
   const engine = new Engine(market, trader);
   await engine.init();
+  await ticks.init(market, engine);
   market.start();
 
   const app = express();
@@ -73,6 +75,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
       open: engine.open().map(pub), closed: engine.closed().slice(-200).reverse().map(pub),
       logs: engine.logs.filter(l => l.id > since).slice(-80), events: engine.events.filter(e => e.id > evSince),
       seq: { log: engine.logSeq, ev: engine.evSeq }, db: store.get().kind,
+      coinHistory: ticks.history(40),
     });
   });
 
@@ -85,7 +88,17 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   app.post('/api/reset-paper', requireAdmin, act(() => engine.resetPaper()));
   app.post('/api/sell/:id', requireAdmin, act(async (req) => { const p = engine.open().find(x => x.id === req.params.id); if (!p) throw new Error('no such open position'); await engine.exit(p, 'manual sell'); }));
 
-  share.mount(app, { engine });
+  app.get('/api/coins/history', requireRead, (req, res) => res.json({ coins: ticks.history(80) }));
+  app.get('/api/coin/:mint/ticks', requireRead, async (req, res) => {
+    const mint = String(req.params.mint || '');
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint) && !/^[a-f0-9]{32,64}$/i.test(mint)) return res.status(400).json({ error: 'bad mint' });
+    const from = +req.query.from || 0, to = +req.query.to || Date.now();
+    const data = await ticks.ticksFor(mint, { from, to, max: 240 });
+    const hist = ticks.history(80).find((c) => c.mint === mint) || null;
+    res.json({ mint, ticks: data, stats: hist });
+  });
+
+  share.mount(app, { engine, ticks });
 
   app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
   app.listen(cfg.PORT, () => console.log(`${cfg.BOT_NAME} on :${cfg.PORT} · mode ${engine.mode} · db ${store.get().kind} · dryRun=${cfg.DRY_RUN} · key=${trader.kp ? 'loaded' : 'none'}`));

@@ -97,7 +97,7 @@ function publicTrade(engine, id) {
   const solUsd = t.solUsdAtClose || engine.market.solUsd || 0;
   return {
     kind: 'trade',
-    id: t.id, symbol: t.symbol, name: t.name || '', image: t.image || null,
+    id: t.id, mint: t.mint, symbol: t.symbol, name: t.name || '', image: t.image || null,
     agent: t.agent, agentName: a.name || t.agent, agentColor: a.color || '#71717A',
     status: t.status, paper: !!t.paper,
     openedAt: t.openedAt, closedAt: t.closedAt || null, holdMs: holdMs(t),
@@ -167,6 +167,53 @@ async function withImage(data) {
 }
 
 function themeOf(q) { return q && q.theme === 'light' ? 'light' : 'dark'; }
+
+function flagsOf(q = {}) {
+  const hide = card.parseHide(q.hide);
+  const showChart = !(q.chart === '0' || q.chart === 'false');
+  return { ...hide, showChart };
+}
+
+function applyPrivacy(d, flags) {
+  if (!d) return d;
+  const out = { ...d, hideProfit: flags.hideProfit, hideInvested: flags.hideInvested, showChart: flags.showChart !== false };
+  if (flags.hideProfit) {
+    delete out.pnlSol; delete out.pnlUsd; delete out.unrealSol;
+    if (out.best) { out.best = { ...out.best }; delete out.best.pnlSol; }
+    if (out.worst) { out.worst = { ...out.worst }; delete out.worst.pnlSol; }
+    if (Array.isArray(out.curve)) {
+      const last = out.curve[out.curve.length - 1];
+      const scale = (last && last.pnl) ? last.pnl / (out.pnlPct || 1) : (out.stack || 0);
+      out.curve = out.curve.map((p) => ({ t: p.t, pct: p.pct != null ? p.pct : (scale ? p.pnl / scale : 0) }));
+    }
+  }
+  if (flags.hideInvested) {
+    delete out.costSol; delete out.proceedsSol; delete out.stack; delete out.tokens; delete out.sizeSol;
+  }
+  return out;
+}
+
+function shareQs(q, extra = {}) {
+  const f = flagsOf(q);
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(extra)) if (v != null && v !== '') p.set(k, String(v));
+  if (themeOf(q) === 'light') p.set('theme', 'light');
+  const hide = card.hideParam(f);
+  if (hide) p.set('hide', hide);
+  if (f.showChart === false) p.set('chart', '0');
+  return p;
+}
+
+function shareDesc(d) {
+  if (d.kind === 'account') {
+    const pct = d.pnlPct != null ? (d.pnlPct < 0 ? '−' : '+') + Math.abs(d.pnlPct * 100).toFixed(1) + '%' : '';
+    const amt = d.hideProfit ? pct : `${d.pnlSol != null ? card.fmtSol(d.pnlSol) : ''}${d.solUsd && d.pnlUsd != null ? ' (' + card.fmtUsd(d.pnlUsd) + ')' : ''}`;
+    return `${amt} · ${d.trades || 0} trades · ${d.trades ? Math.round(d.winRate * 100) + '% win' : 'no trades yet'}${d.paper ? ' · PAPER' : ''}`.replace(/^ · /, '');
+  }
+  const amt = d.hideProfit ? card.fmtPct(d.pnlPct) : `${card.fmtSol(d.pnlSol)}${d.solUsd && d.pnlUsd != null ? ' (' + card.fmtUsd(d.pnlUsd) + ')' : ''} · ${card.fmtPct(d.pnlPct)}`;
+  return `${amt} · ${d.agentName || ''}${d.paper ? ' · PAPER' : ''}`;
+}
+
 
 function ogHtml({ title, description, image, url, theme, svg }) {
   const t = theme === 'light' ? 'light' : 'dark';
@@ -257,14 +304,25 @@ function ogHtml({ title, description, image, url, theme, svg }) {
 </body></html>`;
 }
 
-function mount(app, { engine }) {
-  app.get('/api/share/trade/:id', (req, res) => {
-    const d = publicTrade(engine, req.params.id);
+async function decorateTrade(d, ticks) {
+  if (!d || !ticks || !d.id) return d;
+  try {
+    const t = { mint: d.mint, openedAt: d.openedAt, closedAt: d.closedAt, entryPrice: d.entryPrice, curvePriceAtEntry: d.entryPrice };
+    // publicTrade doesn't include mint? we need mint for ticks
+    const extra = await ticks.forTrade({ ...t, mint: d.mint }, 80);
+    return { ...d, ticks: extra.ticks, pumpPct: extra.pumpPct, dumpPct: extra.dumpPct, holdPumpPct: extra.holdPumpPct, holdDumpPct: extra.holdDumpPct };
+  } catch { return d; }
+}
+
+function mount(app, { engine, ticks }) {
+  app.get('/api/share/trade/:id', async (req, res) => {
+    let d = publicTrade(engine, req.params.id);
     if (!d) return res.status(404).json({ error: 'trade not found' });
-    res.json(d);
+    d = await decorateTrade(d, ticks);
+    res.json(applyPrivacy(d, flagsOf(req.query)));
   });
   app.get('/api/share/account', (req, res) => {
-    try { res.json(publicAccount(engine, req.query)); }
+    try { res.json(applyPrivacy(publicAccount(engine, req.query), flagsOf(req.query))); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
 
@@ -287,17 +345,19 @@ function mount(app, { engine }) {
   });
 
   app.get('/share/trade/:id.png', async (req, res) => {
-    const d = publicTrade(engine, req.params.id);
+    let d = publicTrade(engine, req.params.id);
     if (!d) return res.status(404).json({ error: 'trade not found' });
     try {
+      const f = flagsOf(req.query);
+      d = applyPrivacy(await decorateTrade(d, ticks), f);
       const png = renderPng(card.tradeSvg(await withImage(d), themeOf(req.query)));
-      res.set({ 'Content-Type': 'image/png', 'Cache-Control': d.status === 'closed' ? 'public, max-age=300' : 'public, max-age=15' });
+      res.set({ 'Content-Type': 'image/png', 'Cache-Control': d.status === 'closed' ? 'public, max-age=120' : 'public, max-age=15' });
       res.end(png);
     } catch (e) { res.status(500).json({ error: 'render failed' }); }
   });
   app.get('/share/account.png', async (req, res) => {
     try {
-      const d = publicAccount(engine, req.query);
+      const d = applyPrivacy(publicAccount(engine, req.query), flagsOf(req.query));
       const png = renderPng(card.accountSvg(await withImage(d), themeOf(req.query)));
       res.set({ 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=30' });
       res.end(png);
@@ -305,27 +365,33 @@ function mount(app, { engine }) {
   });
 
   app.get('/share/trade/:id', async (req, res) => {
-    const d = publicTrade(engine, req.params.id);
+    let d = publicTrade(engine, req.params.id);
     if (!d) return res.status(404).type('txt').send('Trade not found');
+    const f = flagsOf(req.query);
+    d = applyPrivacy(await decorateTrade(d, ticks), f);
     const theme = themeOf(req.query);
     const base = publicBase(req);
-    const url = `${base}/share/trade/${d.id}${theme === 'light' ? '?theme=light' : ''}`;
-    const image = `${base}/share/trade/${d.id}.png?theme=${theme}&v=${crypto.createHash('sha1').update(String(d.closedAt || d.pnlSol || d.holdMs)).digest('hex').slice(0, 8)}`;
+    const qs = shareQs(req.query);
+    const qstr = qs.toString();
+    const url = `${base}/share/trade/${d.id}${qstr ? '?' + qstr : ''}`;
+    const image = `${base}/share/trade/${d.id}.png${qstr ? '?' + qstr + '&' : '?'}v=${crypto.createHash('sha1').update(String(d.closedAt || d.holdMs) + (qstr || '')).digest('hex').slice(0, 8)}`;
     const title = `${card.tick(d.symbol)} ${card.fmtPct(d.pnlPct)} · ${cfg.BOT_NAME}`;
-    const description = `${card.fmtSol(d.pnlSol)}${d.solUsd ? ' (' + card.fmtUsd(d.pnlUsd) + ')' : ''} · ${d.agentName || ''}${d.paper ? ' · PAPER' : ''}`;
+    const description = shareDesc(d);
     const svg = card.tradeSvg(await withImage(d), theme);
     res.type('html').send(ogHtml({ title, description, image, url, theme, svg }));
   });
   app.get('/share/account', async (req, res) => {
     try {
-      const d = publicAccount(engine, req.query);
+      const d = applyPrivacy(publicAccount(engine, req.query), flagsOf(req.query));
       const theme = themeOf(req.query);
       const base = publicBase(req);
-      const qs = new URLSearchParams({ range: d.range, ...(d.range === 'custom' ? { from: String(d.from), to: String(d.to) } : {}), ...(theme === 'light' ? { theme: 'light' } : {}) });
+      const extra = { range: d.range };
+      if (d.range === 'custom') { extra.from = String(d.from); extra.to = String(d.to); }
+      const qs = shareQs(req.query, extra);
       const url = `${base}/share/account?${qs}`;
       const image = `${base}/share/account.png?${qs}&v=${Date.now()}`;
-      const title = `${cfg.BOT_NAME} ${d.label} PnL ${d.solUsd ? card.fmtUsd(d.pnlUsd) : card.fmtSol(d.pnlSol)}`;
-      const description = `${card.fmtSol(d.pnlSol)} · ${d.trades} trades · ${d.trades ? Math.round(d.winRate * 100) + '% win' : 'no trades yet'}${d.paper ? ' · PAPER' : ''}`;
+      const title = `${cfg.BOT_NAME} ${d.label} ${d.hideProfit ? 'return ' + (d.pnlPct != null ? ((d.pnlPct < 0 ? '−' : '+') + Math.abs(d.pnlPct * 100).toFixed(1) + '%') : '') : 'PnL'}`;
+      const description = shareDesc(d);
       const svg = card.accountSvg(await withImage(d), theme);
       res.type('html').send(ogHtml({ title, description, image, url, theme, svg }));
     } catch (e) { res.status(400).type('txt').send(e.message); }

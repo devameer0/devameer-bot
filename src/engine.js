@@ -2,6 +2,7 @@
 const crypto = require('crypto');
 const cfg = require('./config');
 const store = require('./db');
+const ticks = require('./ticks');
 
 const AGENTS = {
   scout:    { name: 'Scout',    color: '#EF4444', tp: 0.40, sl: 0.20, maxHoldMs: 10 * 60000, desc: 'social hype: live-streamed or X-linked tokens with real 1h volume and rising price' },
@@ -259,7 +260,7 @@ class Engine {
         agent, status: 'open', paper: r.paper, openedAt: Date.now(), sizeSol: size, costSol: r.costSol, tokens: r.tokens,
         entryPrice: r.costSol / r.tokens, curvePriceAtEntry: priceAtEntry, entryMcapSol: (priceAtEntry || 0) * 1e9, buySig: r.sig, peakValue: r.costSol,
       };
-      this.trades.push(p); this.market.pinned.add(t.mint); this.market.subscribeTrades([t.mint]);
+      this.trades.push(p); this.market.pinned.add(t.mint); this.market.subscribeTrades([t.mint]); ticks.markTraded(t.mint); ticks.record(t, true);
       await store.get().saveTrade(p);
     } catch (e) { this.log(`buy ${$(t)} failed: ${e.message}`, 'err'); }
     finally { this.busy.delete(t.mint); }

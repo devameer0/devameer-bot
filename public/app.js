@@ -20,7 +20,7 @@ const bean = () => { const n = ++beanN; return BEANSRC.replace(/bg1/g, 'bg1_' + 
 $$('[data-bean]').forEach(e => e.innerHTML = bean());
 
 let S = null, logSeq = 0, evSeq = 0, firstLoad = true, shownProfit = 0, knownClosed = new Set();
-let range = 'all', customFrom = '', customTo = '', sharePayload = null, shareTheme = null;
+let range = 'all', customFrom = '', customTo = '', sharePayload = null, shareTheme = null, hideProfit = false, hideInvested = false, showChart = true, chartTrade = null;
 const SHARE_IC = '<svg viewBox="0 0 24 24"><path d="M4 12v8h16v-8"/><path d="M12 4v12"/><path d="M8 8l4-4 4 4"/></svg>';
 
 const fmtUsd = (v, sign = true) => { const a = Math.abs(v); const s = a >= 1000 ? a.toLocaleString(undefined, { maximumFractionDigits: 0 }) : a >= 100 ? a.toFixed(0) : a.toFixed(2); return (sign ? (v < 0 ? '-' : '+') : '') + '$' + s; };
@@ -71,11 +71,11 @@ function card(t, newest) {
   const share = `<button type="button" class="sh" data-share="${esc(t.id)}" title="Share PnL">${SHARE_IC}</button>`;
   if (t.status === 'open') {
     const cur = t.lastValue ?? t.costSol; const pct = (cur / t.costSol - 1) * 100; const pnl = cur - t.costSol;
-    return `<div class="tc open" style="--c:${a.color}" title="${esc(a.name)} · open"><div class="h">${icon(t, a.color)}<span>${tick(t.symbol)}</span></div>
+    return `<div class="tc open" data-chart="${esc(t.id)}" style="--c:${a.color}" title="${esc(a.name)} · open"><div class="h">${icon(t, a.color)}<span>${tick(t.symbol)}</span></div>
       <div class="v"><span class="pct ${pct >= 0 ? 'up' : 'dn'}">${pct >= 0 ? '↑' : '↓'}${Math.abs(pct).toFixed(0)}%</span><span class="usd">${S.solUsd ? fmtUsd(usd(pnl)) : fmtSol(pnl)}</span></div><span class="x">open</span>${share}</div>`;
   }
   const pct = (t.pnlPct || 0) * 100; const win = t.pnlSol >= 0;
-  return `<div class="tc ${win ? '' : 'loss'} ${newest ? 'newest' : ''}" data-id="${t.id}" style="--c:${a.color}" title="${esc(a.name)} · ${esc(t.exitReason || '')}">
+  return `<div class="tc ${win ? '' : 'loss'} ${newest ? 'newest' : ''}" data-id="${t.id}" data-chart="${esc(t.id)}" style="--c:${a.color}" title="${esc(a.name)} · ${esc(t.exitReason || '')}">
     <div class="h">${icon(t, a.color)}<span>${tick(t.symbol)}</span></div>
     <div class="v"><span class="pct ${win ? 'up' : 'dn'}">${win ? '↑' : '↓'}${Math.abs(pct).toFixed(0)}%</span><span class="usd ${win ? '' : 'dn'}">${S.solUsd ? fmtUsd(usd(t.pnlSol)) : fmtSol(t.pnlSol)}</span></div>${share}</div>`;
 }
@@ -170,7 +170,7 @@ function render() {
   // trades tab
   const all = [...S.open, ...S.closed];
   $('#tradeList').innerHTML = all.length ? all.map(t => { const a = S.agents[t.agent]; const pnl = t.status === 'open' ? (t.lastValue ?? t.costSol) - t.costSol : t.pnlSol;
-    return `<div class="row2">${icon(t, a.color)}<div class="grow"><b>${tick(t.symbol)}</b> <span class="muted sm">${a.name} · ${t.status === 'open' ? 'open' : esc(t.exitReason || '')}${t.paper ? ' · paper' : ''}</span><div class="sm muted">${new Date(t.openedAt).toLocaleString()} · cost ${t.costSol.toFixed(4)} SOL ${t.buySig ? `<a href="${solscan(t.buySig)}" target="_blank">buy tx</a>` : ''}${t.sellSig ? `<a href="${solscan(t.sellSig)}" target="_blank">sell tx</a>` : ''}<a href="https://pump.fun/coin/${esc(t.mint)}" target="_blank">pump.fun</a></div></div>
+    return `<div class="row2" data-chart="${esc(t.id)}">${icon(t, a.color)}<div class="grow"><b>${tick(t.symbol)}</b> <span class="muted sm">${a.name} · ${t.status === 'open' ? 'open' : esc(t.exitReason || '')}${t.paper ? ' · paper' : ''}</span><div class="sm muted">${new Date(t.openedAt).toLocaleString()} · cost ${t.costSol.toFixed(4)} SOL ${t.buySig ? `<a href="${solscan(t.buySig)}" target="_blank">buy tx</a>` : ''}${t.sellSig ? `<a href="${solscan(t.sellSig)}" target="_blank">sell tx</a>` : ''}<a href="https://pump.fun/coin/${esc(t.mint)}" target="_blank">pump.fun</a></div></div>
     <div style="text-align:right"><b class="${pnl >= 0 ? 'up' : 'dn'}">${fmtSol(pnl)}</b><div class="sm muted">${S.solUsd ? fmtUsd(usd(pnl)) : ''}</div><div class="btns" style="justify-content:flex-end">${t.status === 'open' && S.authed ? `<button class="pill sm" data-sell="${t.id}" style="padding:4px 10px;margin-top:4px">Sell</button>` : ''}<button class="pill sm" data-share="${t.id}" style="padding:4px 10px;margin-top:4px">Share</button></div></div></div>`; }).join('') : '<div class="card muted">No trades yet.</div>';
   $$('[data-sell]').forEach(b => b.onclick = async () => { if (!confirm('Sell this position now?')) return; try { await api('/api/sell/' + b.dataset.sell, {}); } catch (e) { alert(e.message); } });
 
@@ -195,7 +195,17 @@ function render() {
     $('#agentToggles').innerHTML = Object.entries(S.agents).map(([k, a]) => `<label><input type="checkbox" data-ag="${k}" ${S.settings.agents[k] ? 'checked' : ''}> ${a.name}</label>`).join('');
   }
   $('#resetBtn').classList.toggle('hidden', S.mode === 'LIVE');
+
+  const hist = S.coinHistory || [];
+  $('#histList').innerHTML = hist.map((c) => `<div class="hist-row" data-hist="${esc(c.mint)}" data-hist-symbol="${esc(c.symbol || '')}">
+    ${icon({ symbol: c.symbol, image: c.image }, '#71717A')}
+    <div class="grow"><b>${tick(c.symbol)}</b><div class="sm muted">${esc(c.name || '')}${c.traded ? ' · traded' : ''}</div></div>
+    <div class="pump"><span class="up">↑${Math.abs((c.pumpPct || 0) * 100).toFixed(0)}%</span><span class="dn">↓${Math.abs((c.dumpPct || 0) * 100).toFixed(0)}%</span></div>
+  </div>`).join('');
+  $('#histEmpty').classList.toggle('hidden', hist.length > 0);
+  $('#histLine').textContent = hist.length ? hist.length + ' coins · max pump / dump since first seen' : 'pump & dump since first seen';
 }
+
 
 async function poll() {
   try {
@@ -349,7 +359,7 @@ function tradeShareData(t) {
   const a = S.agents[t.agent] || {};
   const solUsd = t.solUsdAtClose || S.solUsd || 0;
   return {
-    kind: 'trade', id: t.id, symbol: t.symbol, name: t.name || '', image: t.image || null,
+    kind: 'trade', id: t.id, mint: t.mint, symbol: t.symbol, name: t.name || '', image: t.image || null,
     agent: t.agent, agentName: a.name || t.agent, agentColor: a.color || '#71717A',
     status: t.status, paper: t.paper !== false && (t.paper || S.mode !== 'LIVE'),
     openedAt: t.openedAt, closedAt: t.closedAt || null, holdMs: (t.closedAt || Date.now()) - t.openedAt,
@@ -371,14 +381,41 @@ function accountShareData() {
     botName: S.bot?.name || 'Devameer Bot', badge: S.bot?.badge || 'DEVAMEER TERMINAL',
   };
 }
-function shareLink(d) {
-  if (d.kind === 'account') {
-    const qs = new URLSearchParams({ range: d.range === 'custom' ? 'custom' : (d.range || 'all') });
+function loadHidePrefs() {
+  try {
+    const j = JSON.parse(localStorage.getItem('devameer-share-hide') || 'null');
+    if (j && typeof j === 'object') {
+      hideProfit = !!j.profit; hideInvested = !!j.invested;
+      if (j.chart != null) showChart = !!j.chart;
+    }
+  } catch { /* ignore */ }
+  if ($('#hideProfit')) $('#hideProfit').checked = hideProfit;
+  if ($('#hideInvested')) $('#hideInvested').checked = hideInvested;
+  if ($('#showChart')) $('#showChart').checked = showChart;
+}
+function saveHidePrefs() {
+  try { localStorage.setItem('devameer-share-hide', JSON.stringify({ profit: hideProfit, invested: hideInvested, chart: showChart })); } catch { /* ignore */ }
+}
+function applyShareFlags(d) {
+  return { ...d, hideProfit, hideInvested, showChart: d.kind === 'trade' ? showChart : false };
+}
+function shareQuery(d) {
+  const qs = new URLSearchParams();
+  if (d && d.kind === 'account') {
+    qs.set('range', d.range === 'custom' ? 'custom' : (d.range || 'all'));
     if (d.range === 'custom') { qs.set('from', new Date(d.from).toISOString()); qs.set('to', new Date(d.to).toISOString()); }
-    if (shareTheme === 'light') qs.set('theme', 'light');
-    return location.origin + '/share/account?' + qs;
   }
-  return location.origin + '/share/trade/' + d.id + (shareTheme === 'light' ? '?theme=light' : '');
+  if (shareTheme === 'light') qs.set('theme', 'light');
+  const hide = [hideProfit && 'profit', hideInvested && 'invested'].filter(Boolean).join(',');
+  if (hide) qs.set('hide', hide);
+  if (d && d.kind === 'trade' && !showChart) qs.set('chart', '0');
+  return qs;
+}
+function shareLink(d) {
+  const qs = shareQuery(d);
+  const q = qs.toString();
+  if (d.kind === 'account') return location.origin + '/share/account?' + q;
+  return location.origin + '/share/trade/' + d.id + (q ? '?' + q : '');
 }
 async function inlineImage(d) {
   if (!d.image) return d;
@@ -390,18 +427,40 @@ async function inlineImage(d) {
     return { ...d, imageData, image: undefined };
   } catch { return d; }
 }
+async function attachTicks(d) {
+  if (!d || d.kind !== 'trade' || !d.mint || (d.ticks && d.ticks.length)) return d;
+  try {
+    const from = (d.openedAt || Date.now()) - 3 * 60000;
+    const to = (d.closedAt || Date.now()) + 3 * 60000;
+    const j = await api('/api/coin/' + encodeURIComponent(d.mint) + '/ticks?from=' + from + '&to=' + to);
+    const ticks = j.ticks || [];
+    const hold = ticks.filter((x) => x.t >= (d.openedAt || 0) && x.t <= (d.closedAt || Date.now()));
+    const entry = d.entryPrice || (hold[0] && hold[0].price);
+    const peak = hold.length ? Math.max(...hold.map((x) => x.price)) : null;
+    const trough = hold.length ? Math.min(...hold.map((x) => x.price)) : null;
+    return {
+      ...d, ticks,
+      pumpPct: j.stats ? j.stats.pumpPct : d.pumpPct,
+      dumpPct: j.stats ? j.stats.dumpPct : d.dumpPct,
+      holdPumpPct: entry && peak ? peak / entry - 1 : null,
+      holdDumpPct: entry && trough ? trough / entry - 1 : null,
+    };
+  } catch { return d; }
+}
 async function paintShare() {
   if (!sharePayload) return;
-  const d = await inlineImage(sharePayload);
+  const d = applyShareFlags(await inlineImage(sharePayload));
   const svg = d.kind === 'account' ? ShareCard.accountSvg(d, shareTheme) : ShareCard.tradeSvg(d, shareTheme);
   $('#shareCardWrap').innerHTML = svg;
-  $('#shareTheme').textContent = shareTheme === 'light' ? 'Dark card' : 'Light card';
+  $$('#shareThemeSwitch [data-card-theme]').forEach((b) => b.classList.toggle('on', b.dataset.cardTheme === shareTheme));
   $('#shareTitle').textContent = d.kind === 'account' ? (d.label || 'Account') + ' PnL' : tick(d.symbol) + ' PnL';
+  $('#showChartWrap').classList.toggle('hidden', d.kind !== 'trade');
 }
 async function openShare(d) {
-  sharePayload = d;
+  sharePayload = await attachTicks(d);
   shareTheme = shareTheme || currentTheme();
   shareMsg('');
+  loadHidePrefs();
   $('#shareDlg').classList.remove('hidden');
   await paintShare();
 }
@@ -413,18 +472,66 @@ async function sharePngBlob() {
   c.getContext('2d').drawImage(img, 0, 0);
   return new Promise((res) => c.toBlob(res, 'image/png'));
 }
+async function openChart(t) {
+  if (!t) return;
+  chartTrade = t;
+  const theme = currentTheme();
+  const T = ShareCard.THEMES[theme] || ShareCard.THEMES.dark;
+  $('#chartTitle').textContent = tick(t.symbol) + ' pump / dump';
+  $('#chartDlg').classList.remove('hidden');
+  $('#chartWrap').innerHTML = '<div class="muted sm" style="padding:20px">Loading chart…</div>';
+  const d = await attachTicks(t.id ? tradeShareData(t) : { kind: 'trade', mint: t.mint, symbol: t.symbol, name: t.name || '', openedAt: t.openedAt || Date.now() - 3600000, closedAt: t.closedAt, status: t.status || 'closed', paper: true, agentName: '' });
+  const ticks = d.ticks || [];
+  const pump = d.holdPumpPct != null ? d.holdPumpPct : d.pumpPct;
+  const dump = d.holdDumpPct != null ? d.holdDumpPct : d.dumpPct;
+  $('#chartMeta').innerHTML = `${esc(d.name || tick(d.symbol))} · ${esc(d.agentName || '')} · ${t.status === 'open' ? 'open' : esc(t.exitReason || 'closed')}<br>
+    Since first seen: <b class="up">↑${Math.abs((d.pumpPct || 0) * 100).toFixed(0)}%</b> /
+    <b class="dn">↓${Math.abs((d.dumpPct || 0) * 100).toFixed(0)}%</b>
+    ${d.holdPumpPct != null ? ' · During trade: <b class="up">↑' + Math.abs(d.holdPumpPct * 100).toFixed(0) + '%</b> / <b class="dn">↓' + Math.abs((d.holdDumpPct || 0) * 100).toFixed(0) + '%</b>' : ''}`;
+  if (ticks.length < 2) {
+    $('#chartWrap').innerHTML = '<div class="muted sm" style="padding:20px">Not enough price ticks yet for this coin. The bot records ticks for watched and traded coins.</div>';
+    return;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="420" viewBox="0 0 1000 420">${ShareCard.priceChart(ticks, { x: 36, y: 40, w: 928, h: 340, entryAt: d.openedAt, exitAt: d.closedAt || (d.status === 'open' ? Date.now() : null), entryPrice: d.entryPrice, exitPrice: d.exitPrice }, T)}</svg>`;
+  $('#chartWrap').innerHTML = svg;
+}
+
 function initShare() {
+  loadHidePrefs();
   document.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-share]');
-    if (!b || !S) return;
-    const t = findTrade(b.dataset.share);
-    if (!t) return;
-    openShare(tradeShareData(t));
+    const sh = e.target.closest('[data-share]');
+    if (sh && S) {
+      const t = findTrade(sh.dataset.share);
+      if (t) openShare(tradeShareData(t));
+      return;
+    }
+    const ch = e.target.closest('[data-chart]');
+    if (ch && S) {
+      const t = findTrade(ch.dataset.chart);
+      if (t) openChart(t);
+      return;
+    }
+    const h = e.target.closest('[data-hist]');
+    if (h && S) {
+      const t = [...(S.open || []), ...(S.closed || [])].find((x) => x.mint === h.dataset.hist);
+      if (t) openChart(t);
+      else openChart({ mint: h.dataset.hist, symbol: h.dataset.histSymbol, status: 'closed', openedAt: Date.now() - 3600000, name: '' });
+    }
   });
   $('#shareAcctBtn').onclick = () => { if (!S) return; openShare(accountShareData()); };
   $('#shareClose').onclick = () => $('#shareDlg').classList.add('hidden');
   $('#shareDlg').addEventListener('click', (e) => { if (e.target === $('#shareDlg')) $('#shareDlg').classList.add('hidden'); });
-  $('#shareTheme').onclick = async () => { shareTheme = shareTheme === 'light' ? 'dark' : 'light'; await paintShare(); };
+  $$('#shareThemeSwitch [data-card-theme]').forEach((b) => b.onclick = async () => { shareTheme = b.dataset.cardTheme; await paintShare(); });
+  const syncHide = async () => {
+    hideProfit = $('#hideProfit').checked; hideInvested = $('#hideInvested').checked; showChart = $('#showChart').checked;
+    saveHidePrefs(); await paintShare();
+  };
+  $('#hideProfit').onchange = syncHide;
+  $('#hideInvested').onchange = syncHide;
+  $('#showChart').onchange = syncHide;
+  $('#chartClose').onclick = () => $('#chartDlg').classList.add('hidden');
+  $('#chartDlg').addEventListener('click', (e) => { if (e.target === $('#chartDlg')) $('#chartDlg').classList.add('hidden'); });
+  $('#chartShare').onclick = () => { if (!chartTrade || !chartTrade.id) return; $('#chartDlg').classList.add('hidden'); openShare(tradeShareData(chartTrade)); };
   $('#shareDl').onclick = async () => {
     try {
       const b = await sharePngBlob();
@@ -452,7 +559,7 @@ function initShare() {
   $('#shareX').onclick = () => {
     if (!sharePayload) return;
     const url = shareLink(sharePayload);
-    const text = ShareCard.tweetText(sharePayload, url);
+    const text = ShareCard.tweetText(applyShareFlags(sharePayload), url);
     window.open('https://x.com/intent/post?text=' + encodeURIComponent(text), '_blank', 'noopener');
   };
   $('#shareLink').onclick = async () => {

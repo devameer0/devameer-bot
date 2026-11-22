@@ -107,6 +107,7 @@ class Market extends EventEmitter {
     t.vSol = s.vSol; t.vTok = s.vTok; t.price = price; t.mcapSol = price * 1e9;
     if (price > t.peak) t.peak = price;
     if (t.firstPrice === undefined) t.firstPrice = price;
+    this.emit('sample', t);
   }
 
   // price change over the last `ms` milliseconds (fraction), null if insufficient data

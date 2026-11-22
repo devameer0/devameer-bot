@@ -54,3 +54,7 @@ Public, read-only links (no wallet, key, admin, or withdraw data):
 Add `?theme=light` for the light card. Open Graph / Twitter `og:image` points at the PNG so a pasted link can show the card preview. The badge on the card is **PAPER** whenever the trade (or the account, in paper mode) is simulated; it only says **LIVE** for real fills.
 
 On Render's free plan there is no persistent disk, so history resets when the service restarts unless `DATABASE_URL` is set.
+
+Share cards have **Hide profit** (keeps the % only) and **Hide invested** (hides SOL in/out and size) toggles. The choice is stored in `localStorage` as `devameer-share-hide` and is passed on public links as `?hide=profit,invested`, including the Open Graph PNG, so the public page never shows hidden amounts. Cards can be downloaded in dark or light.
+
+The bot records a compact price-tick history for watched and traded coins (capped in SQLite). Open a trade or a row in **Coin history** to see the pump/dump chart with entry and exit markers. A mini chart can be included on the per-coin share card (`?chart=0` to hide it).
