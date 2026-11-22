@@ -3,7 +3,8 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 // Original mascot: a white jellybean with oval eyes, orange blush and a teal sprout.
-const BEAN = `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><defs>
+let beanN = 0;
+const BEANSRC = `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><defs>
 <radialGradient id="bg1" cx="38%" cy="30%" r="75%"><stop offset="0" stop-color="#fff"/><stop offset=".62" stop-color="#F1F1F3"/><stop offset="1" stop-color="#B9BAC2"/></radialGradient>
 <radialGradient id="bg2" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>
 <path d="M104 26c18 2 24 14 22 24" stroke="#0F766E" stroke-width="5" fill="none" stroke-linecap="round"/>
@@ -15,7 +16,8 @@ const BEAN = `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><def
 <ellipse cx="111" cy="97" rx="3" ry="4.5" fill="#fff"/><ellipse cx="149" cy="91" rx="3" ry="4.5" fill="#fff"/>
 <ellipse cx="96" cy="134" rx="10" ry="5" fill="#FDBA74" opacity=".7"/><ellipse cx="164" cy="126" rx="9" ry="5" fill="#FDBA74" opacity=".7"/>
 <path d="M124 132q8 7 16 0" stroke="#0A0A0A" stroke-width="3.5" fill="none" stroke-linecap="round"/></svg>`;
-$$('[data-bean]').forEach(e => e.innerHTML = BEAN);
+const bean = () => { const n = ++beanN; return BEANSRC.replace(/bg1/g, 'bg1_' + n).replace(/bg2/g, 'bg2_' + n); };
+$$('[data-bean]').forEach(e => e.innerHTML = bean());
 
 let S = null, logSeq = 0, evSeq = 0, firstLoad = true, shownProfit = 0, knownClosed = new Set();
 const fmtUsd = (v, sign = true) => { const a = Math.abs(v); const s = a >= 1000 ? a.toLocaleString(undefined, { maximumFractionDigits: 0 }) : a >= 100 ? a.toFixed(0) : a.toFixed(2); return (sign ? (v < 0 ? '-' : '+') : '') + '$' + s; };
@@ -106,7 +108,7 @@ function island(t) {
 }
 function banner(title, body) {
   const el = document.createElement('div'); el.className = 'bn';
-  el.innerHTML = `<div class="av">${BEAN}</div><div><b>${esc(title)}</b><div class="sm">${esc(body)}</div></div><span class="now">now</span>`;
+  el.innerHTML = `<div class="av">${bean()}</div><div><b>${esc(title)}</b><div class="sm">${esc(body)}</div></div><span class="now">now</span>`;
   $('#banners').appendChild(el);
   setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 450); }, 4200);
 }
@@ -139,7 +141,7 @@ function render() {
   const tot = Object.values(s.byAgent).reduce((a, v) => a + Math.abs(v), 0);
   $('#seg').innerHTML = Object.entries(S.agents).map(([k, a]) => `<div style="background:${a.color};flex:${tot ? Math.abs(s.byAgent[k]) / tot : 1}"></div>`).join('');
   $('#agentsLine').textContent = `${S.bot.name} runs ${Object.values(S.settings.agents).filter(Boolean).length} agents`;
-  $('#agents').innerHTML = Object.entries(S.agents).map(([k, a]) => { const v = s.byAgent[k] || 0; return `<div class="agent" title="${esc(a.desc)}"><i style="background:${a.color};${S.settings.agents[k] ? '' : 'opacity:.3'}"></i><span>${a.name}</span><b class="${v < 0 ? 'dn' : ''}">${S.solUsd ? fmtUsd(usd(v)) : fmtSol(v)}</b></div>`; }).join('');
+  $('#agents').innerHTML = Object.entries(S.agents).map(([k, a]) => { const v = s.byAgent[k] || 0; return `<div class="agent" title="${esc(a.desc)}"><div class="an"><i style="background:${a.color};${S.settings.agents[k] ? '' : 'opacity:.3'}"></i><span>${a.name}</span></div><b class="${v < 0 ? 'dn' : ''}">${S.solUsd ? fmtUsd(usd(v)) : fmtSol(v)}</b></div>`; }).join('');
 
   // trades
   $('#totalLine').textContent = `${s.count} total`;
