@@ -296,19 +296,50 @@
     state.cam.auto = true;
   }
 
+  function nodeBounds() {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of state.nodes) {
+      minX = Math.min(minX, n.x - 110); maxX = Math.max(maxX, n.x + 130);
+      minY = Math.min(minY, n.y - 90); maxY = Math.max(maxY, n.y + 110);
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  function clampCam(tx, ty, k) {
+    const wrap = $('#wrap').getBoundingClientRect();
+    const { minX, minY, maxX, maxY } = nodeBounds();
+    const pad = 20;
+    const minTx = wrap.width - pad - maxX * k;
+    const maxTx = pad - minX * k;
+    const minTy = wrap.height - pad - maxY * k;
+    const maxTy = pad - minY * k;
+    if (minTx <= maxTx) tx = Math.min(maxTx, Math.max(minTx, tx));
+    else tx = state.fit.x;
+    if (minTy <= maxTy) ty = Math.min(maxTy, Math.max(minTy, ty));
+    else ty = state.fit.y;
+    return { tx, ty };
+  }
+
   function updateCamera(dt, now) {
     if (now - state.cam.userAt > IDLE_RESUME_MS) state.cam.auto = true;
     if (state.cam.auto) {
-      const recent = state.activity.filter((a) => now - a.at < 3500);
+      computeFit();
+      // Only meaningful events (pass/reject/buy/sell/exit) pull the camera.
+      // Token/tick floods would otherwise pin the view on the left feed cluster.
+      const recent = state.activity.filter((a) => now - a.at < 3500 && a.w >= 1.1);
       if (recent.length && now - state.focus.at < 8000) {
         let sx = 0, sy = 0, sw = 0;
         for (const a of recent) { sx += a.x * a.w; sy += a.y * a.w; sw += a.w; }
         const cx = sx / sw, cy = sy / sw;
         const wrap = $('#wrap').getBoundingClientRect();
-        const k = Math.min(state.fit.k * 1.22, Math.max(state.fit.k * 0.95, state.fit.k * 1.12));
+        const k = state.fit.k * 1.05;
+        const blend = 0.22;
+        let tx = state.fit.x * (1 - blend) + (wrap.width / 2 - cx * k) * blend;
+        let ty = state.fit.y * (1 - blend) + (wrap.height / 2 - cy * k) * blend;
+        const c = clampCam(tx, ty, k);
         state.cam.tk = k;
-        state.cam.tx = wrap.width / 2 - cx * k;
-        state.cam.ty = wrap.height / 2 - cy * k;
+        state.cam.tx = c.tx;
+        state.cam.ty = c.ty;
       } else {
         state.cam.tx = state.fit.x; state.cam.ty = state.fit.y; state.cam.tk = state.fit.k;
       }
