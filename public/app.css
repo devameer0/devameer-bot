@@ -211,3 +211,18 @@ input{font:inherit;color:inherit;background:var(--input)}
 .chart-meta{font-size:13px;color:var(--mut);margin:0 0 10px;line-height:1.5}
 .chart-wrap{background:var(--card);border-radius:18px;overflow:hidden;line-height:0}
 .chart-wrap svg{width:100%;height:auto;display:block}
+
+/* custom card background + replay */
+.bg-controls{margin:0 0 12px;padding:10px;border-radius:16px;background:var(--chip)}
+.bg-h{font-size:12px;font-weight:800;margin-bottom:8px}
+.bg-slider{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;margin:6px 0}
+.bg-slider input{flex:1}
+.share-card-wrap{position:relative}
+.share-card-wrap .card-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none}
+.share-card-wrap .card-bg.contain{object-fit:contain;background:#000}
+.share-card-wrap .card-bg-dim{position:absolute;inset:0;z-index:1;pointer-events:none}
+.share-card-wrap svg,.share-card-wrap canvas.card-fg{position:relative;z-index:2;width:100%;height:auto;display:block}
+.replay-sheet{width:min(520px,100%)}
+.replay-stage{border-radius:18px;overflow:hidden;background:#09090B;line-height:0;margin:8px 0 12px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.replay-stage canvas{width:100%;height:auto;display:block;background:#09090B}
+.replay-stage.portrait{max-width:320px;margin-left:auto;margin-right:auto}

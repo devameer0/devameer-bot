@@ -20,7 +20,7 @@ const bean = () => { const n = ++beanN; return BEANSRC.replace(/bg1/g, 'bg1_' + 
 $$('[data-bean]').forEach(e => e.innerHTML = bean());
 
 let S = null, logSeq = 0, evSeq = 0, firstLoad = true, shownProfit = 0, knownClosed = new Set();
-let range = 'all', customFrom = '', customTo = '', sharePayload = null, shareTheme = null, hideProfit = false, hideInvested = false, showChart = true, chartTrade = null;
+let range = 'all', customFrom = '', customTo = '', sharePayload = null, shareTheme = null, hideProfit = false, hideInvested = false, showChart = true, chartTrade = null, replayPayload = null, replayAspect = '1:1', replayStop = null, bgState = { settings: { dim: 0.48, blur: 10, fit: 'cover' }, rec: null, url: null, el: null };
 const SHARE_IC = '<svg viewBox="0 0 24 24"><path d="M4 12v8h16v-8"/><path d="M12 4v12"/><path d="M8 8l4-4 4 4"/></svg>';
 
 const fmtUsd = (v, sign = true) => { const a = Math.abs(v); const s = a >= 1000 ? a.toLocaleString(undefined, { maximumFractionDigits: 0 }) : a >= 100 ? a.toFixed(0) : a.toFixed(2); return (sign ? (v < 0 ? '-' : '+') : '') + '$' + s; };
@@ -171,7 +171,7 @@ function render() {
   const all = [...S.open, ...S.closed];
   $('#tradeList').innerHTML = all.length ? all.map(t => { const a = S.agents[t.agent]; const pnl = t.status === 'open' ? (t.lastValue ?? t.costSol) - t.costSol : t.pnlSol;
     return `<div class="row2" data-chart="${esc(t.id)}">${icon(t, a.color)}<div class="grow"><b>${tick(t.symbol)}</b> <span class="muted sm">${a.name} · ${t.status === 'open' ? 'open' : esc(t.exitReason || '')}${t.paper ? ' · paper' : ''}</span><div class="sm muted">${new Date(t.openedAt).toLocaleString()} · cost ${t.costSol.toFixed(4)} SOL ${t.buySig ? `<a href="${solscan(t.buySig)}" target="_blank">buy tx</a>` : ''}${t.sellSig ? `<a href="${solscan(t.sellSig)}" target="_blank">sell tx</a>` : ''}<a href="https://pump.fun/coin/${esc(t.mint)}" target="_blank">pump.fun</a></div></div>
-    <div style="text-align:right"><b class="${pnl >= 0 ? 'up' : 'dn'}">${fmtSol(pnl)}</b><div class="sm muted">${S.solUsd ? fmtUsd(usd(pnl)) : ''}</div><div class="btns" style="justify-content:flex-end">${t.status === 'open' && S.authed ? `<button class="pill sm" data-sell="${t.id}" style="padding:4px 10px;margin-top:4px">Sell</button>` : ''}<button class="pill sm" data-share="${t.id}" style="padding:4px 10px;margin-top:4px">Share</button></div></div></div>`; }).join('') : '<div class="card muted">No trades yet.</div>';
+    <div style="text-align:right"><b class="${pnl >= 0 ? 'up' : 'dn'}">${fmtSol(pnl)}</b><div class="sm muted">${S.solUsd ? fmtUsd(usd(pnl)) : ''}</div><div class="btns" style="justify-content:flex-end">${t.status === 'open' && S.authed ? `<button class="pill sm" data-sell="${t.id}" style="padding:4px 10px;margin-top:4px">Sell</button>` : ''}<button class="pill sm" data-share="${t.id}" style="padding:4px 10px;margin-top:4px">Share</button><button class="pill sm" data-replay="${t.id}" style="padding:4px 10px;margin-top:4px">Replay</button></div></div></div>`; }).join('') : '<div class="card muted">No trades yet.</div>';
   $$('[data-sell]').forEach(b => b.onclick = async () => { if (!confirm('Sell this position now?')) return; try { await api('/api/sell/' + b.dataset.sell, {}); } catch (e) { alert(e.message); } });
 
   // me tab
@@ -449,9 +449,27 @@ async function attachTicks(d) {
 }
 async function paintShare() {
   if (!sharePayload) return;
+  const hasBg = !!(bgState.el);
   const d = applyShareFlags(await inlineImage(sharePayload));
+  d.transparentBg = hasBg;
   const svg = d.kind === 'account' ? ShareCard.accountSvg(d, shareTheme) : ShareCard.tradeSvg(d, shareTheme);
-  $('#shareCardWrap').innerHTML = svg;
+  const wrap = $('#shareCardWrap');
+  const s = bgState.settings;
+  const dim = s.dim != null ? s.dim : 0.48;
+  const blur = s.blur != null ? s.blur : 10;
+  const fit = s.fit === 'contain' ? 'contain' : 'cover';
+  const overlay = shareTheme === 'light' ? 'rgba(255,255,255,' + dim + ')' : 'rgba(8,8,10,' + dim + ')';
+  if (hasBg) {
+    const tag = bgState.rec && bgState.rec.kind === 'video' ? 'video' : 'img';
+    wrap.innerHTML = '<' + tag + ' class="card-bg ' + fit + '" ' + (tag === 'video' ? 'autoplay muted loop playsinline' : '') + '></' + tag + '><div class="card-bg-dim"></div>' + svg;
+    const media = wrap.querySelector('.card-bg');
+    media.src = bgState.url;
+    media.style.objectFit = fit;
+    media.style.filter = blur ? 'blur(' + blur + 'px) scale(1.08)' : 'none';
+    wrap.querySelector('.card-bg-dim').style.background = overlay;
+  } else {
+    wrap.innerHTML = svg;
+  }
   $$('#shareThemeSwitch [data-card-theme]').forEach((b) => b.classList.toggle('on', b.dataset.cardTheme === shareTheme));
   $('#shareTitle').textContent = d.kind === 'account' ? (d.label || 'Account') + ' PnL' : tick(d.symbol) + ' PnL';
   $('#showChartWrap').classList.toggle('hidden', d.kind !== 'trade');
@@ -465,11 +483,17 @@ async function openShare(d) {
   await paintShare();
 }
 async function sharePngBlob() {
-  const svg = $('#shareCardWrap').innerHTML.trim();
+  const d = applyShareFlags(await inlineImage(sharePayload));
+  d.transparentBg = !!(bgState.el);
+  const svg = d.kind === 'account' ? ShareCard.accountSvg(d, shareTheme) : ShareCard.tradeSvg(d, shareTheme);
   const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
   const img = new Image(); img.src = url; await img.decode();
   const c = document.createElement('canvas'); c.width = ShareCard.W; c.height = ShareCard.H;
-  c.getContext('2d').drawImage(img, 0, 0);
+  const ctx = c.getContext('2d');
+  if (bgState.el) {
+    Replay.drawBackground(ctx, ShareCard.W, ShareCard.H, { theme: shareTheme, bg: { ...bgState.settings, image: bgState.rec && bgState.rec.kind === 'video' ? null : bgState.el, video: bgState.rec && bgState.rec.kind === 'video' ? bgState.el : null, el: bgState.el } });
+  }
+  ctx.drawImage(img, 0, 0);
   return new Promise((res) => c.toBlob(res, 'image/png'));
 }
 async function openChart(t) {
@@ -499,6 +523,12 @@ async function openChart(t) {
 function initShare() {
   loadHidePrefs();
   document.addEventListener('click', (e) => {
+    const rp = e.target.closest('[data-replay]');
+    if (rp && S) {
+      const t = findTrade(rp.dataset.replay);
+      if (t) openReplay(tradeShareData(t));
+      return;
+    }
     const sh = e.target.closest('[data-share]');
     if (sh && S) {
       const t = findTrade(sh.dataset.share);
@@ -566,5 +596,134 @@ function initShare() {
     if (!sharePayload) return;
     const url = shareLink(sharePayload);
     try { await navigator.clipboard.writeText(url); shareMsg('Copied link'); } catch { shareMsg(url); }
+  };
+
+  $('#shareReplay').onclick = () => { if (sharePayload) openReplay(sharePayload); };
+  $('#chartReplay').onclick = () => { if (chartTrade && chartTrade.id) { $('#chartDlg').classList.add('hidden'); openReplay(tradeShareData(chartTrade)); } };
+  initBgAndReplay();
+}
+
+
+// ---- custom backgrounds + replay
+function replayMsg(t) { const el = $('#replayMsg'); if (el) el.textContent = t || ''; }
+function bgOpts() {
+  return { dim: bgState.settings.dim, blur: bgState.settings.blur, fit: bgState.settings.fit, image: bgState.rec && bgState.rec.kind !== 'video' ? bgState.el : null, video: bgState.rec && bgState.rec.kind === 'video' ? bgState.el : null, el: bgState.el };
+}
+function syncBgControls() {
+  const s = bgState.settings;
+  $$('.js-bg-dim').forEach((i) => { i.value = Math.round((s.dim || 0) * 100); });
+  $$('.js-bg-blur').forEach((i) => { i.value = s.blur || 0; });
+  $$('.js-bg-fit [data-fit]').forEach((b) => b.classList.toggle('on', b.dataset.fit === (s.fit || 'cover')));
+  const label = bgState.rec ? ((bgState.rec.kind === 'video' ? 'Video: ' : 'Photo: ') + (bgState.rec.name || 'uploaded')) : 'Default background (public links stay default)';
+  $$('.js-bg-name').forEach((n) => { n.textContent = label; });
+}
+async function setBgFile(file) {
+  const rec = await BgStore.saveFile(file);
+  if (bgState.url) URL.revokeObjectURL(bgState.url);
+  bgState.rec = rec;
+  const blob = rec.blob || file;
+  bgState.url = URL.createObjectURL(blob);
+  const el = rec.kind === 'video' ? document.createElement('video') : document.createElement('img');
+  if (rec.kind === 'video') { el.muted = true; el.loop = true; el.playsInline = true; el.autoplay = true; }
+  el.src = bgState.url;
+  if (rec.kind === 'video') { try { await el.play(); } catch { /* autoplay */ } }
+  else { await new Promise((res) => { el.onload = res; el.onerror = res; }); }
+  bgState.el = el;
+  syncBgControls();
+  if (sharePayload) await paintShare();
+  paintReplayFrame(0.45);
+}
+async function clearBg() {
+  await BgStore.clearFile();
+  if (bgState.url) URL.revokeObjectURL(bgState.url);
+  bgState.rec = null; bgState.url = null; bgState.el = null;
+  syncBgControls();
+  if (sharePayload) await paintShare();
+  paintReplayFrame(0.45);
+}
+async function loadBg() {
+  bgState.settings = BgStore.settings();
+  try {
+    const rec = await BgStore.loadFile();
+    if (rec && rec.blob) {
+      bgState.rec = rec;
+      bgState.url = URL.createObjectURL(rec.blob);
+      const el = rec.kind === 'video' ? document.createElement('video') : document.createElement('img');
+      if (rec.kind === 'video') { el.muted = true; el.loop = true; el.playsInline = true; el.autoplay = true; }
+      el.src = bgState.url;
+      bgState.el = el;
+      if (rec.kind === 'video') el.play().catch(() => {});
+    }
+  } catch { /* first run */ }
+  syncBgControls();
+}
+function paintReplayFrame(p) {
+  const canvas = $('#replayCanvas');
+  if (!canvas || !replayPayload) return;
+  const L = Replay.layout(replayAspect);
+  canvas.width = L.W; canvas.height = L.H;
+  Replay.drawFrame(canvas.getContext('2d'), applyShareFlags(replayPayload), p == null ? 0.45 : p, { theme: shareTheme || currentTheme(), aspect: replayAspect, bg: bgOpts() });
+  $('#replayStage').classList.toggle('portrait', replayAspect === '9:16');
+}
+async function openReplay(d) {
+  replayPayload = await attachTicks(d);
+  shareTheme = shareTheme || currentTheme();
+  replayMsg('');
+  loadHidePrefs();
+  $('#replayTitle').textContent = d.kind === 'account' ? ((d.label || 'Account') + ' replay') : (tick(d.symbol) + ' replay');
+  $$('#replayThemeSwitch [data-card-theme]').forEach((b) => b.classList.toggle('on', b.dataset.cardTheme === shareTheme));
+  $$('#replayAspect [data-aspect]').forEach((b) => b.classList.toggle('on', b.dataset.aspect === replayAspect));
+  $('#replayDlg').classList.remove('hidden');
+  paintReplayFrame(0);
+  setTimeout(() => startReplayPreview(), 40);
+}
+function startReplayPreview() {
+  if (replayStop) replayStop();
+  const canvas = $('#replayCanvas');
+  if (!canvas || !replayPayload) return;
+  replayStop = Replay.play(canvas, applyShareFlags(replayPayload), { theme: shareTheme || currentTheme(), aspect: replayAspect, seconds: Replay.durationOf(replayPayload), bg: bgOpts() }, {
+    onDone: () => { replayStop = null; },
+  });
+}
+function initBgAndReplay() {
+  loadBg();
+  document.addEventListener('change', async (e) => {
+    const photo = e.target.closest && e.target.closest('.js-bg-photo');
+    const video = e.target.closest && e.target.closest('.js-bg-video');
+    const dim = e.target.closest && e.target.closest('.js-bg-dim');
+    const blur = e.target.closest && e.target.closest('.js-bg-blur');
+    try {
+      if (photo && photo.files && photo.files[0]) { await setBgFile(photo.files[0]); photo.value = ''; }
+      if (video && video.files && video.files[0]) { await setBgFile(video.files[0]); video.value = ''; }
+      if (dim) { bgState.settings = BgStore.saveSettings({ dim: (+dim.value || 0) / 100 }); syncBgControls(); if (sharePayload) await paintShare(); paintReplayFrame(0.45); }
+      if (blur) { bgState.settings = BgStore.saveSettings({ blur: +blur.value || 0 }); syncBgControls(); if (sharePayload) await paintShare(); paintReplayFrame(0.45); }
+    } catch (er) { shareMsg(er.message); replayMsg(er.message); }
+  });
+  document.addEventListener('click', async (e) => {
+    if (e.target.closest && e.target.closest('.js-bg-clear')) { await clearBg(); }
+    const fit = e.target.closest && e.target.closest('.js-bg-fit [data-fit]');
+    if (fit) {
+      bgState.settings = BgStore.saveSettings({ fit: fit.dataset.fit });
+      syncBgControls();
+      if (sharePayload) await paintShare();
+      paintReplayFrame(0.45);
+    }
+  });
+  $('#replayClose').onclick = () => { if (replayStop) replayStop(); $('#replayDlg').classList.add('hidden'); };
+  $('#replayDlg').addEventListener('click', (e) => { if (e.target === $('#replayDlg')) { if (replayStop) replayStop(); $('#replayDlg').classList.add('hidden'); } });
+  $$('#replayThemeSwitch [data-card-theme]').forEach((b) => b.onclick = () => { shareTheme = b.dataset.cardTheme; $$('#replayThemeSwitch [data-card-theme]').forEach((x) => x.classList.toggle('on', x === b)); startReplayPreview(); });
+  $$('#replayAspect [data-aspect]').forEach((b) => b.onclick = () => { replayAspect = b.dataset.aspect; $$('#replayAspect [data-aspect]').forEach((x) => x.classList.toggle('on', x === b)); startReplayPreview(); });
+  $('#replayPlay').onclick = () => startReplayPreview();
+  $('#replayDl').onclick = async () => {
+    if (!replayPayload) return;
+    replayMsg('Rendering MP4… this can take a few seconds');
+    try {
+      const canvas = $('#replayCanvas');
+      const out = await Replay.exportMp4(canvas, applyShareFlags(replayPayload), { theme: shareTheme || currentTheme(), aspect: replayAspect, seconds: Replay.durationOf(replayPayload), bg: bgOpts() }, (p) => replayMsg('Rendering… ' + Math.round(p * 100) + '%'));
+      const name = (replayPayload.kind === 'account' ? 'devameer-account-replay' : 'devameer-' + (replayPayload.symbol || 'trade') + '-replay') + '.' + out.ext;
+      const a = document.createElement('a'); a.href = URL.createObjectURL(out.blob); a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      replayMsg(out.ext === 'mp4' ? 'Saved MP4' : 'Saved WebM (MP4 encoder unavailable in this browser; server transcode also failed)');
+    } catch (e) { replayMsg(e.message); }
   };
 }

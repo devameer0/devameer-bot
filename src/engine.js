@@ -262,6 +262,7 @@ class Engine {
       };
       this.trades.push(p); this.market.pinned.add(t.mint); this.market.subscribeTrades([t.mint]); ticks.markTraded(t.mint); ticks.record(t, true);
       await store.get().saveTrade(p);
+      await this.persistSnapshot();
     } catch (e) { this.log(`buy ${$(t)} failed: ${e.message}`, 'err'); }
     finally { this.busy.delete(t.mint); }
   }
@@ -278,6 +279,15 @@ class Engine {
     if (reason) await this.exit(p, reason);
   }
 
+  async persistSnapshot() {
+    try {
+      const db = store.get();
+      if (!db || !db.saveSnapshot) return;
+      const s = this.summary();
+      await db.saveSnapshot({ realized: s.realized, unreal: s.unreal, withdrawn: s.withdrawn, open: this.open().length, closed: this.closed().length, stack: this.stack, mode: this.mode });
+    } catch { /* snapshot is best-effort */ }
+  }
+
   async exit(p, reason) {
     if (this.busy.has(p.id) || p.status !== 'open') return;
     this.busy.add(p.id);
@@ -289,6 +299,7 @@ class Engine {
       p.pnlSol = r.proceedsSol - p.costSol; p.pnlPct = p.pnlSol / p.costSol; p.solUsdAtClose = this.market.solUsd;
       this.market.pinned.delete(p.mint);
       await store.get().saveTrade(p);
+      await this.persistSnapshot();
       const usd = p.pnlSol * (this.market.solUsd || 0);
       const amt = this.market.solUsd ? `${usd >= 0 ? '+' : '-'}$${Math.abs(usd).toFixed(2)}` : `${p.pnlSol.toFixed(4)} SOL`;
       this.log(`closed ${$(p)} ${p.pnlSol >= 0 ? '+' : ''}${Math.round(p.pnlPct * 100)}% (${amt}) · ${reason}`, p.pnlSol >= 0 ? 'win' : 'loss', { sig: r.sig });

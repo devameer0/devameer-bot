@@ -108,8 +108,12 @@
       ${rightBadges}`;
   }
 
-  function wrap(T, inner) {
+  function wrap(T, inner, d) {
     const stroke = T.stroke;
+    const transparent = d && d.transparentBg;
+    const bgRect = transparent
+      ? `<rect width="${W}" height="${H}" rx="36" fill="none"/>`
+      : `<rect width="${W}" height="${H}" rx="36" fill="url(#bg)" stroke="${stroke}" stroke-width="2"/>`;
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <defs>
@@ -117,9 +121,12 @@
       <stop offset="0" stop-color="${T.bg2}"/><stop offset=".55" stop-color="${T.bg}"/>
     </linearGradient>
     <clipPath id="av"><rect x="56" y="132" width="88" height="88" rx="18"/></clipPath>
+    <clipPath id="card"><rect width="${W}" height="${H}" rx="36"/></clipPath>
   </defs>
-  <rect width="${W}" height="${H}" rx="36" fill="url(#bg)" stroke="${stroke}" stroke-width="2"/>
+  <g clip-path="url(#card)">
+  ${bgRect}
   ${inner}
+  </g>
 </svg>`;
   }
 
@@ -244,7 +251,7 @@
       ${cells}
       <text x="56" y="556" font-size="14" font-weight="500" fill="${T.dim}">${esc(foot)}${holdNote ? '  ·  ' + esc(holdNote) : ''}</text>
       <text x="1144" y="594" text-anchor="end" font-size="12" font-weight="600" fill="${T.dim}">devameer-bot</text>`;
-    return wrap(T, inner);
+    return wrap(T, inner, d);
   }
 
   function spark(points, x, y, w, h, T, accent, key) {
@@ -310,7 +317,7 @@
       ${spark(d.curve, 620, 140, 524, 280, T, accent, curveKey)}
       ${cells}
       <text x="1144" y="594" text-anchor="end" font-size="12" font-weight="600" fill="${T.dim}">devameer-bot</text>`;
-    return wrap(T, inner);
+    return wrap(T, inner, d);
   }
 
   function tweetText(d, url) {

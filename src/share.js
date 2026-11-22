@@ -398,4 +398,4 @@ function mount(app, { engine, ticks }) {
   });
 }
 
-module.exports = { mount, publicTrade, publicAccount, rangeBounds };
+module.exports = { mount, publicTrade, publicAccount, rangeBounds, applyPrivacy, flagsOf, decorateTrade, themeOf };

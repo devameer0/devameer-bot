@@ -179,9 +179,26 @@
       <label><input type="checkbox" id="hideInvested"> Hide invested</label>
       <label id="showChartWrap"><input type="checkbox" id="showChart" checked> Show chart</label>
     </div>
+
+    <div class="bg-controls">
+      <div class="bg-h">Card background</div>
+      <div class="btns" style="margin:0 0 8px">
+        <label class="pill">Photo<input type="file" class="js-bg-photo" accept="image/*" hidden></label>
+        <label class="pill">Video<input type="file" class="js-bg-video" accept="video/mp4,video/webm,video/quicktime" hidden></label>
+        <button type="button" class="pill js-bg-clear">Clear</button>
+      </div>
+      <label class="bg-slider">Dim <input type="range" class="js-bg-dim" min="0" max="80" value="48"></label>
+      <label class="bg-slider">Blur <input type="range" class="js-bg-blur" min="0" max="24" value="10"></label>
+      <div class="theme-switch js-bg-fit">
+        <button type="button" data-fit="cover">Cover</button>
+        <button type="button" data-fit="contain">Contain</button>
+      </div>
+      <div class="muted sm js-bg-name"></div>
+    </div>
     <div class="share-card-wrap" id="shareCardWrap"></div>
     <div class="share-actions">
       <button type="button" class="pill dark" id="shareDl">Download PNG</button>
+      <button type="button" class="pill" id="shareReplay">Replay video</button>
       <button type="button" class="pill" id="shareCopy">Copy image</button>
       <button type="button" class="pill orange" id="shareX">Post on X</button>
       <button type="button" class="pill" id="shareLink">Copy link</button>
@@ -194,6 +211,7 @@
     <div class="share-toolbar">
       <h3 id="chartTitle">Coin chart</h3>
       <div class="btns" style="margin:0">
+        <button type="button" class="pill" id="chartReplay">Replay</button>
         <button type="button" class="pill orange" id="chartShare">Share</button>
         <button type="button" class="pill" id="chartClose">Close</button>
       </div>
@@ -202,7 +220,49 @@
     <div class="chart-wrap" id="chartWrap"></div>
   </div>
 </div>
+
+<div id="replayDlg" class="dlg hidden">
+  <div class="share-sheet replay-sheet">
+    <div class="share-toolbar">
+      <h3 id="replayTitle">Replay PnL</h3>
+      <button type="button" class="pill" id="replayClose">Close</button>
+    </div>
+    <div class="theme-switch" id="replayThemeSwitch">
+      <button type="button" data-card-theme="dark">Dark</button>
+      <button type="button" data-card-theme="light">Light</button>
+    </div>
+    <div class="theme-switch" id="replayAspect">
+      <button type="button" data-aspect="1:1" class="on">1:1</button>
+      <button type="button" data-aspect="9:16">9:16</button>
+    </div>
+
+    <div class="bg-controls">
+      <div class="bg-h">Card background</div>
+      <div class="btns" style="margin:0 0 8px">
+        <label class="pill">Photo<input type="file" class="js-bg-photo" accept="image/*" hidden></label>
+        <label class="pill">Video<input type="file" class="js-bg-video" accept="video/mp4,video/webm,video/quicktime" hidden></label>
+        <button type="button" class="pill js-bg-clear">Clear</button>
+      </div>
+      <label class="bg-slider">Dim <input type="range" class="js-bg-dim" min="0" max="80" value="48"></label>
+      <label class="bg-slider">Blur <input type="range" class="js-bg-blur" min="0" max="24" value="10"></label>
+      <div class="theme-switch js-bg-fit">
+        <button type="button" data-fit="cover">Cover</button>
+        <button type="button" data-fit="contain">Contain</button>
+      </div>
+      <div class="muted sm js-bg-name"></div>
+    </div>
+
+    <div class="replay-stage" id="replayStage"><canvas id="replayCanvas"></canvas></div>
+    <div class="share-actions">
+      <button type="button" class="pill" id="replayPlay">Play</button>
+      <button type="button" class="pill dark" id="replayDl">Download MP4</button>
+    </div>
+    <div class="share-msg" id="replayMsg"></div>
+  </div>
+</div>
 <script src="/share-card.js"></script>
+<script src="/bg-store.js"></script>
+<script src="/replay.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

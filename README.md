@@ -53,8 +53,18 @@ Public, read-only links (no wallet, key, admin, or withdraw data):
 
 Add `?theme=light` for the light card. Open Graph / Twitter `og:image` points at the PNG so a pasted link can show the card preview. The badge on the card is **PAPER** whenever the trade (or the account, in paper mode) is simulated; it only says **LIVE** for real fills.
 
-On Render's free plan there is no persistent disk, so history resets when the service restarts unless `DATABASE_URL` is set.
+On Render's free plan there is no persistent disk for SQLite, so set `DATABASE_URL` (see Persistent history below) or history resets on restart.
 
 Share cards have **Hide profit** (keeps the % only) and **Hide invested** (hides SOL in/out and size) toggles. The choice is stored in `localStorage` as `devameer-share-hide` and is passed on public links as `?hide=profit,invested`, including the Open Graph PNG, so the public page never shows hidden amounts. Cards can be downloaded in dark or light.
 
 The bot records a compact price-tick history for watched and traded coins (capped in SQLite). Open a trade or a row in **Coin history** to see the pump/dump chart with entry and exit markers. A mini chart can be included on the per-coin share card (`?chart=0` to hide it).
+
+
+## Replay videos
+Every trade (and the account share card) has a **Replay video** button. It plays an 8–15 second 30fps clip of the price (or account) curve drawing from buy to exit, with IN/OUT markers, a live PnL % counter, a peak-pump callout, Devameer Bot / @devameer0 branding, and an honest PAPER/LIVE badge. Choose **1:1 (1080×1080)** or **9:16 (1080×1920)**. Hide profit / hide invested and dark/light are respected. Download saves an **MP4** (WebCodecs in the browser, or a server-side `ffmpeg-static` render / transcode). A public endpoint `/share/trade/:id.mp4` (and `/share/account.mp4`) renders the default-background clip; only one render runs at a time to stay light on the free plan.
+
+## Custom card backgrounds
+In the share sheet and replay dialog you can upload a **photo (≤5 MB)** or **video (≤25 MB, ≤30s)** as the card/replay background, with dim and blur sliders and cover/contain fit. Video backgrounds loop under the replay and are included in the downloaded MP4; stills are used for the PNG card. Uploads stay in this browser (IndexedDB) — **public share links keep the default background** so nothing is stored on the server.
+
+## Persistent history
+On Render's free plan the local SQLite file is wiped on every restart. Set `DATABASE_URL` (or `SUPABASE_DB_URL`) to a Postgres database (Supabase) so trades, open positions, price ticks, coin history, and account snapshots survive deploys. Optional `DATABASE_SCHEMA` (default `devameer_bot` when the URL is a Supabase host). Without `DATABASE_URL`, the bot still uses SQLite in `DATA_DIR` for local previews.

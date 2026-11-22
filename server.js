@@ -9,6 +9,7 @@ const { Trader } = require('./src/trader');
 const { Engine, AGENTS } = require('./src/engine');
 const share = require('./src/share');
 const ticks = require('./src/ticks');
+const replay = require('./src/replay');
 
 const SECRET = cfg.SESSION_SECRET || crypto.createHash('sha256').update('devameer-bot:' + (cfg.ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex'))).digest('hex');
 const sign = (v) => v + '.' + crypto.createHmac('sha256', SECRET).update(v).digest('hex');
@@ -74,7 +75,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
       feed: { ...market.stats, watching: market.watchList().length, tracked: market.tokens.size },
       open: engine.open().map(pub), closed: engine.closed().slice(-200).reverse().map(pub),
       logs: engine.logs.filter(l => l.id > since).slice(-80), events: engine.events.filter(e => e.id > evSince),
-      seq: { log: engine.logSeq, ev: engine.evSeq }, db: store.get().kind,
+      seq: { log: engine.logSeq, ev: engine.evSeq }, db: store.get().kind, dbSchema: store.get().schema || null,
       coinHistory: ticks.history(40),
     });
   });
@@ -99,6 +100,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   });
 
   share.mount(app, { engine, ticks });
+  replay.mount(app, { engine, ticks, share, requireAdmin, requireRead });
 
   app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
   app.listen(cfg.PORT, () => console.log(`${cfg.BOT_NAME} on :${cfg.PORT} · mode ${engine.mode} · db ${store.get().kind} · dryRun=${cfg.DRY_RUN} · key=${trader.kp ? 'loaded' : 'none'}`));
