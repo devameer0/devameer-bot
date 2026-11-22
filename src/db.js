@@ -48,21 +48,27 @@ async function init() {
       create table if not exists ${ident('coin_stats')} (mint text primary key, data jsonb not null);
       create table if not exists ${ident('positions')} (id text primary key, data jsonb not null, opened_at bigint not null);
       create table if not exists ${ident('account_snapshots')} (at bigint primary key, data jsonb not null);
-      create table if not exists ${ident('flow_events')} (
-        id bigint primary key,
-        at bigint not null,
-        node text not null,
-        type text,
-        mint text,
-        symbol text,
-        agent text,
-        ok boolean,
-        message text,
-        data jsonb
-      );
-      create index if not exists flow_events_at_idx on ${ident('flow_events')} (at desc);
     `;
     await pool.query(ddl);
+    // flow_events may already exist (provisioned by migration) and be owned
+    // by a different role. Never let this table take down boot.
+    try {
+      await pool.query(`
+        create table if not exists ${ident('flow_events')} (
+          id bigint primary key,
+          at bigint not null,
+          node text not null,
+          type text,
+          mint text,
+          symbol text,
+          agent text,
+          ok boolean,
+          message text,
+          data jsonb
+        );
+      `);
+      await pool.query(`create index if not exists flow_events_at_idx on ${ident('flow_events')} (at desc)`);
+    } catch (e) { console.warn('flow_events ddl skipped:', e.message); }
     const savePos = (t) => pool.query(`insert into ${ident('positions')} (id,data,opened_at) values ($1,$2,$3) on conflict (id) do update set data=excluded.data`, [t.id, t, t.openedAt]);
     const delPos = (id) => pool.query(`delete from ${ident('positions')} where id=$1`, [id]);
     impl = {
