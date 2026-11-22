@@ -45,8 +45,10 @@
     <div class="rec-livebar hidden" id="recLiveBar">
       <span class="rec-pulse"></span>
       <span id="recTimer">0:00</span>
+      <span class="rec-pct hidden" id="recPct">0%</span>
       <button type="button" class="rec-stop" id="recStop">Stop</button>
     </div>
+    <div class="rec-progress hidden" id="recProgress" aria-hidden="true"><i id="recProgressBar"></i></div>
     <div class="rec-pop hidden" id="recPop">
       <div class="rec-seg" data-group="mode">
         <button type="button" data-mode="live" class="on">Live</button>
@@ -58,6 +60,10 @@
           <button type="button" data-mins="1" class="on">1m</button>
           <button type="button" data-mins="5">5m</button>
           <button type="button" data-mins="15">15m</button>
+        </div>
+        <div class="rec-seg rec-seg-more">
+          <button type="button" data-mins="30">30m</button>
+          <button type="button" data-mins="60">1h</button>
         </div>
         <div class="rec-label">Speed</div>
         <div class="rec-seg">

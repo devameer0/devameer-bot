@@ -116,13 +116,19 @@ async function init() {
         }
         await pool.query(`insert into ${ident('flow_events')} (id,at,node,type,mint,symbol,agent,ok,message,data) values ${vals.join(',')} on conflict (id) do nothing`, args);
       },
-      listFlowEvents: async ({ since, limit } = {}) => {
-        const lim = Math.min(limit || 2000, 5000);
-        if (since) {
-          return (await pool.query(`select id, at, node, type, mint, symbol, agent, ok, message, data from ${ident('flow_events')} where id>$1 order by id asc limit $2`, [since, lim])).rows;
-        }
-        const rows = (await pool.query(`select id, at, node, type, mint, symbol, agent, ok, message, data from ${ident('flow_events')} order by id desc limit $1`, [lim])).rows;
-        return rows.reverse();
+      listFlowEvents: async ({ since, from, to, limit } = {}) => {
+        const lim = Math.min(Math.max(+(limit) || 2000, 1), 20000);
+        const clauses = [], args = [];
+        if (since) { args.push(+since); clauses.push('id>$' + args.length); }
+        if (from) { args.push(+from); clauses.push('at>=$' + args.length); }
+        if (to) { args.push(+to); clauses.push('at<=$' + args.length); }
+        const where = clauses.length ? 'where ' + clauses.join(' and ') : '';
+        args.push(lim);
+        const rows = (await pool.query(
+          `select id, at, node, type, mint, symbol, agent, ok, message, data from ${ident('flow_events')} ${where} order by id desc limit $${args.length}`,
+          args,
+        )).rows;
+        return rows.reverse().map((r) => ({ ...r, id: Number(r.id), at: Number(r.at), ok: r.ok == null ? null : !!r.ok }));
       },
       capFlowEvents: async (max) => {
         await pool.query(`delete from ${ident('flow_events')} where id < coalesce((select id from ${ident('flow_events')} order by id desc offset $1 limit 1), 0)`, [max]);
@@ -192,10 +198,15 @@ async function init() {
       saveSnapshot: async (data) => upSnap.run(Date.now(), JSON.stringify(data)),
       listSnapshots: async (limit) => db.prepare(`select at, data from account_snapshots order by at desc limit ?`).all(limit || 200).map((r) => ({ at: r.at, data: JSON.parse(r.data) })),
       saveFlowEvents: async (rows) => insFlows(rows),
-      listFlowEvents: async ({ since, limit } = {}) => {
-        const lim = Math.min(limit || 2000, 5000);
-        if (since) return db.prepare(`select id, at, node, type, mint, symbol, agent, ok, message, data from flow_events where id>? order by id asc limit ?`).all(since, lim).map(parseFlow);
-        return db.prepare(`select id, at, node, type, mint, symbol, agent, ok, message, data from flow_events order by id desc limit ?`).all(lim).map(parseFlow).reverse();
+      listFlowEvents: async ({ since, from, to, limit } = {}) => {
+        const lim = Math.min(Math.max(+(limit) || 2000, 1), 20000);
+        const clauses = [], args = [];
+        if (since) { clauses.push('id>?'); args.push(+since); }
+        if (from) { clauses.push('at>=?'); args.push(+from); }
+        if (to) { clauses.push('at<=?'); args.push(+to); }
+        const where = clauses.length ? 'where ' + clauses.join(' and ') : '';
+        args.push(lim);
+        return db.prepare(`select id, at, node, type, mint, symbol, agent, ok, message, data from flow_events ${where} order by id desc limit ?`).all(...args).map(parseFlow).map((r) => ({ ...r, id: Number(r.id), at: Number(r.at) })).reverse();
       },
       capFlowEvents: async (max) => {
         db.prepare(`delete from flow_events where id not in (select id from flow_events order by id desc limit ?)`).run(max);

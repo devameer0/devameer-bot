@@ -156,11 +156,11 @@ function ffmpegBin() {
 }
 
 let xcodeBusy = false;
-app.post('/api/flow/transcode', requireSession, express.raw({ type: () => true, limit: '40mb' }), async (req, res) => {
+app.post('/api/flow/transcode', requireSession, express.raw({ type: () => true, limit: '150mb' }), async (req, res) => {
   if (xcodeBusy) return res.status(429).json({ error: 'A video is already transcoding. Try again in a moment.' });
   const buf = req.body;
   if (!buf || !buf.length) return res.status(400).json({ error: 'video required' });
-  if (buf.length > 40 * 1024 * 1024) return res.status(400).json({ error: 'Video must be 40 MB or smaller' });
+  if (buf.length > 150 * 1024 * 1024) return res.status(400).json({ error: 'Video must be 150 MB or smaller' });
   xcodeBusy = true;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devameer-flow-xcode-'));
   const inn = path.join(tmp, 'in.webm');
@@ -171,11 +171,11 @@ app.post('/api/flow/transcode', requireSession, express.raw({ type: () => true, 
       const ff = spawn(ffmpegBin(), [
         '-y', '-hide_banner', '-loglevel', 'error', '-i', inn,
         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-crf', '23',
-        '-an', '-movflags', '+faststart', out,
+        '-threads', '0', '-an', '-movflags', '+faststart', out,
       ]);
       let err = '';
       ff.stderr.on('data', (d) => { err += d; });
-      const to = setTimeout(() => { try { ff.kill('SIGKILL'); } catch {} reject(new Error('transcode timed out')); }, 120000);
+      const to = setTimeout(() => { try { ff.kill('SIGKILL'); } catch {} reject(new Error('transcode timed out')); }, 8 * 60 * 1000);
       ff.on('error', (e) => { clearTimeout(to); reject(e); });
       ff.on('close', (code) => {
         clearTimeout(to);

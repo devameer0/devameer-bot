@@ -50,3 +50,8 @@ html,body{height:100%;background:#0B0B0D;color:#FAFAFA;font-family:Inter,system-
   .rec-hud{top:10px;right:10px}
   .rec-pop{width:188px}
 }
+
+.rec-seg-more{margin-top:4px}
+.rec-pct{font:700 10px Inter,system-ui,sans-serif;color:#A1A1AA;min-width:2.4em}
+.rec-progress{width:204px;max-width:70vw;height:3px;background:#27272A;border-radius:99px;overflow:hidden;align-self:flex-end}
+.rec-progress i{display:block;height:100%;width:0;background:#22C55E;border-radius:99px;transition:width .12s linear}

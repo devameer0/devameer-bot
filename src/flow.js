@@ -3,7 +3,8 @@ const cfg = require('./config');
 const store = require('./db');
 
 const RING_MAX = 2000;
-const DB_CAP = 5000;
+const DB_CAP = 20000;
+const HISTORY_MAX = 20000;
 const SECRET_KEY = /pass(word|phrase)?|secret|private.?key|api.?key|session|cookie|authorization|bearer|mnemonic|seed|recovery|database_url|connection.?string|wallet.?private|admin.?password/i;
 
 const NODES = [
@@ -145,24 +146,59 @@ function emit(raw) {
   return ev;
 }
 
-function history({ since, node, symbol, type, agent, errors, q, limit } = {}) {
-  const lim = Math.min(Math.max(+(limit) || 400, 1), 2000);
-  const needle = q ? String(q).toLowerCase() : '';
+function matchesEvent(e, { node, symbol, type, agent, errors, q } = {}) {
+  if (node && e.node !== node) return false;
+  if (type && e.type !== type) return false;
+  if (agent && e.agent !== agent) return false;
+  if (errors && !(e.type === 'error' || e.ok === false || e.node === 'errors')) return false;
   const coin = symbol ? String(symbol).replace(/^\$/, '').toLowerCase() : '';
+  if (coin && String(e.symbol || '').toLowerCase() !== coin && String(e.mint || '').toLowerCase() !== coin) return false;
+  if (q) {
+    const needle = String(q).toLowerCase();
+    const blob = ((e.message || '') + ' ' + (e.symbol || '') + ' ' + (e.node || '') + ' ' + (e.type || '') + ' ' + (e.agent || '')).toLowerCase();
+    if (!blob.includes(needle)) return false;
+  }
+  return true;
+}
+
+function history({ since, from, to, node, symbol, type, agent, errors, q, limit } = {}) {
+  const lim = Math.min(Math.max(+(limit) || 400, 1), HISTORY_MAX);
   let list = ring;
   if (since) list = list.filter((e) => e.id > +since);
-  return list.filter((e) => {
-    if (node && e.node !== node) return false;
-    if (type && e.type !== type) return false;
-    if (agent && e.agent !== agent) return false;
-    if (errors && !(e.type === 'error' || e.ok === false || e.node === 'errors')) return false;
-    if (coin && String(e.symbol || '').toLowerCase() !== coin && String(e.mint || '').toLowerCase() !== coin) return false;
-    if (needle) {
-      const blob = ((e.message || '') + ' ' + (e.symbol || '') + ' ' + (e.node || '') + ' ' + (e.type || '') + ' ' + (e.agent || '')).toLowerCase();
-      if (!blob.includes(needle)) return false;
-    }
-    return true;
-  }).slice(-lim);
+  if (from) list = list.filter((e) => (e.at || 0) >= +from);
+  if (to) list = list.filter((e) => (e.at || 0) <= +to);
+  return list.filter((e) => matchesEvent(e, { node, symbol, type, agent, errors, q })).slice(-lim);
+}
+
+async function historyAsync(opts = {}) {
+  const lim = Math.min(Math.max(+(opts.limit) || 400, 1), HISTORY_MAX);
+  const from = +(opts.from || 0) || 0;
+  const to = +(opts.to || 0) || 0;
+  const oldestRing = ring.length ? (ring[0].at || 0) : 0;
+  const wantMore = !!from || (opts.limit && +opts.limit > ring.length);
+  const ringMisses = from && (!ring.length || oldestRing > from);
+  let list = null;
+  if (wantMore || ringMisses) {
+    try {
+      const db = store.get();
+      if (db && db.listFlowEvents) {
+        list = await db.listFlowEvents({ from: from || undefined, to: to || undefined, since: opts.since, limit: lim });
+        const seen = new Set((list || []).map((e) => e.id));
+        for (const e of ring) {
+          if (seen.has(e.id)) continue;
+          if (from && (e.at || 0) < from) continue;
+          if (to && (e.at || 0) > to) continue;
+          list.push(e);
+        }
+        list.sort((a, b) => (a.id || 0) - (b.id || 0) || (a.at || 0) - (b.at || 0));
+      }
+    } catch (e) { console.warn('flow db history failed:', e.message); }
+  }
+  if (!list) return history(opts);
+  if (opts.since) list = list.filter((e) => e.id > +opts.since);
+  if (from) list = list.filter((e) => (e.at || 0) >= from);
+  if (to) list = list.filter((e) => (e.at || 0) <= to);
+  return list.filter((e) => matchesEvent(e, opts)).slice(-lim);
 }
 
 function nodeConfig(id) {
@@ -303,13 +339,21 @@ function mount(app, { requireAdmin, requireFlowRead }) {
       configs: Object.fromEntries(NODES.map((n) => [n.id, nodeConfig(n.id)])),
     });
   });
-  app.get('/api/flow/events', gate, (req, res) => {
-    const events = history({
-      since: req.query.since, node: req.query.node, symbol: req.query.symbol || req.query.coin,
-      type: req.query.type, agent: req.query.agent, errors: req.query.errors === '1' || req.query.errors === 'true',
-      q: req.query.q, limit: req.query.limit,
-    });
-    res.json({ events, stats, seq, status: status() });
+  app.get('/api/flow/events', gate, async (req, res) => {
+    try {
+      const opts = {
+        since: req.query.since, from: req.query.from || req.query.sinceAt, to: req.query.to,
+        node: req.query.node, symbol: req.query.symbol || req.query.coin,
+        type: req.query.type, agent: req.query.agent, errors: req.query.errors === '1' || req.query.errors === 'true',
+        q: req.query.q, limit: req.query.limit,
+      };
+      const events = (opts.from || opts.to || +(opts.limit) > 2000)
+        ? await historyAsync(opts)
+        : history(opts);
+      res.json({ events, stats, seq, status: status(), cap: { ring: RING_MAX, db: DB_CAP } });
+    } catch (e) {
+      res.status(500).json({ error: e.message || 'history failed' });
+    }
   });
   app.get('/api/flow/stream', gate, (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -324,4 +368,4 @@ function mount(app, { requireAdmin, requireFlowRead }) {
   });
 }
 
-module.exports = { emit, attach, mount, history, status, stats, NODES, EDGES, WORLD, nodeConfig, RING_MAX, DB_CAP };
+module.exports = { emit, attach, mount, history, historyAsync, status, stats, NODES, EDGES, WORLD, nodeConfig, RING_MAX, DB_CAP, HISTORY_MAX };
