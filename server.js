@@ -10,6 +10,7 @@ const { Engine, AGENTS } = require('./src/engine');
 const share = require('./src/share');
 const ticks = require('./src/ticks');
 const replay = require('./src/replay');
+const flow = require('./src/flow');
 
 const SECRET = cfg.SESSION_SECRET || crypto.createHash('sha256').update('devameer-bot:' + (cfg.ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex'))).digest('hex');
 const sign = (v) => v + '.' + crypto.createHmac('sha256', SECRET).update(v).digest('hex');
@@ -24,6 +25,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   const engine = new Engine(market, trader);
   await engine.init();
   await ticks.init(market, engine);
+  await flow.attach({ market, engine, trader, ticks });
   market.start();
 
   const app = express();
@@ -102,6 +104,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   // Register replay MP4 routes before /share/trade/:id so :id.mp4 is not swallowed.
   replay.mount(app, { engine, ticks, share, requireAdmin, requireRead });
   share.mount(app, { engine, ticks });
+  flow.mount(app, { requireAdmin });
 
   app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
   app.listen(cfg.PORT, () => console.log(`${cfg.BOT_NAME} on :${cfg.PORT} · mode ${engine.mode} · db ${store.get().kind} · dryRun=${cfg.DRY_RUN} · key=${trader.kp ? 'loaded' : 'none'}`));

@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const cfg = require('./config');
 const store = require('./db');
 const ticks = require('./ticks');
+const flow = require('./flow');
 
 const AGENTS = {
   scout:    { name: 'Scout',    color: '#EF4444', tp: 0.40, sl: 0.20, maxHoldMs: 10 * 60000, desc: 'social hype: live-streamed or X-linked tokens with real 1h volume and rising price' },
@@ -109,6 +110,7 @@ class Engine {
     }
     this.running = true;
     this.log(`up, scanning pump.fun + X`, 'info');
+    flow.emit({ node: 'risk', type: 'status', ok: true, message: 'scanning started' });
     const usd = this.stack * (this.market.solUsd || 0);
     this.event('banner', { title: `${cfg.BOT_NAME} started`, body: `4 agents · pump.fun · stack ${usd ? '$' + Math.round(usd).toLocaleString() : this.stack.toFixed(3) + ' SOL'}${this.trader.live ? '' : ' (paper)'}` });
   }
@@ -116,6 +118,7 @@ class Engine {
   async stop(sellAll) {
     this.running = false;
     this.log(sellAll ? 'stopping. selling all open positions' : 'paused. open positions still managed by exits', 'info');
+    flow.emit({ node: 'risk', type: 'status', message: sellAll ? 'stopped — selling open positions' : 'paused — exits still active' });
     if (sellAll) for (const p of this.open()) await this.exit(p, 'manual stop');
   }
 
@@ -150,6 +153,8 @@ class Engine {
     this.log(`sent ${usd ? '$' + usd.toFixed(2) : sol.toFixed(4) + ' SOL'} to your Phantom${r.paper ? ' (paper, no real transfer)' : ''}`, 'withdraw', { sig: r.sig });
     this.event('banner', { title: `Withdrawn: +${usd ? '$' + usd.toFixed(2) : sol.toFixed(4) + ' SOL'}`, body: `sent to Phantom · ${sol.toFixed(4)} SOL${r.paper ? ' · paper' : ''}` });
     this.event('withdrawn', { sol });
+    flow.emit({ node: 'withdraw', type: 'withdraw', ok: true, message: `withdraw ${sol.toFixed(4)} SOL${r.paper ? ' (paper)' : ''}`, data: { sol, paper: r.paper } });
+    flow.emit({ node: 'db', type: 'write', from: 'withdraw', ok: true, message: 'saved withdrawal record' });
     return w;
   }
 
@@ -158,8 +163,8 @@ class Engine {
     if (t.mayhem) return; // mayhem-mode tokens have a non-standard curve + AI trader; ignore
     if (!this.running || !this.settings.agents.sniper) return;
     // filters that are knowable at creation
-    if (t.devPct > cfg.MAX_DEV_PCT) { if (Math.random() < 0.25) this.log(`skipped ${$(t)} - dev holds ${Math.round(t.devPct)}%`, 'skip'); this.tried.add(t.mint); }
-    else if (this.rugCreators.has(t.creator)) { this.log(`skipped ${$(t)} - same dev as a rug`, 'skip'); this.tried.add(t.mint); }
+    if (t.devPct > cfg.MAX_DEV_PCT) { if (Math.random() < 0.25) this.log(`skipped ${$(t)} - dev holds ${Math.round(t.devPct)}%`, 'skip'); this.tried.add(t.mint); flow.emit({ node: 'rugs', type: 'reject', ok: false, mint: t.mint, symbol: t.symbol, agent: 'sniper', from: 'feed', message: `rejected ${$(t)} — dev holds ${Math.round(t.devPct)}%`, data: { reason: 'dev holdings', devPct: t.devPct } }); }
+    else if (this.rugCreators.has(t.creator)) { this.log(`skipped ${$(t)} - same dev as a rug`, 'skip'); this.tried.add(t.mint); flow.emit({ node: 'rugs', type: 'reject', ok: false, mint: t.mint, symbol: t.symbol, agent: 'sniper', from: 'feed', message: `rejected ${$(t)} — same dev as a rug`, data: { reason: 'prior rug' } }); }
   }
 
   trackRugs() {
@@ -167,6 +172,7 @@ class Engine {
       if (!t.creator || this.rugCreators.has(t.creator) || !t.firstPrice || !t.peak || !t.price) continue;
       if (t.peak > t.firstPrice * 1.5 && t.price < t.peak * 0.2) {
         this.rugCreators.add(t.creator);
+        flow.emit({ node: 'rugs', type: 'alert', mint: t.mint, symbol: t.symbol, message: `${$(t)} dumped after a pump — prior-rug creator marked` });
         if (this.rugCreators.size % 5 === 1) store.get().set('rugCreators', [...this.rugCreators].slice(-2000));
       }
     }
@@ -222,6 +228,8 @@ class Engine {
 
   async onTick() {
     // exits first
+    const openN = this.open().length;
+    if (openN) flow.emit({ node: 'monitor', type: 'tick', from: 'rpc', message: `monitoring ${openN} open position${openN === 1 ? '' : 's'}`, data: { open: openN } });
     for (const p of this.open()) await this.checkExit(p);
     if (!this.running) return;
     const s = this.summary();
@@ -230,17 +238,26 @@ class Engine {
       this.log(`goal ${this.settings.goal}x done. keep going?`, 'goal');
       this.event('banner', { title: `Goal reached: ${this.settings.goal}x`, body: `${s.mult.toFixed(2)}x · ${s.count} trades · ${Math.round(s.winRate * 100)}% win` });
       this.event('confetti', {});
+      flow.emit({ node: 'risk', type: 'reject', ok: false, message: `goal ${this.settings.goal}x reached — new buys on hold` });
     }
     if (this.goalHold) return;
-    if (this.dailyLossHit()) { if (!this._lossLogged) { this.log(`daily loss limit ${cfg.DAILY_LOSS_LIMIT_SOL} SOL hit. no new buys today`, 'err'); this._lossLogged = dayKey(); } return; }
+    if (this.dailyLossHit()) { if (!this._lossLogged) { this.log(`daily loss limit ${cfg.DAILY_LOSS_LIMIT_SOL} SOL hit. no new buys today`, 'err'); this._lossLogged = dayKey(); flow.emit({ node: 'risk', type: 'reject', ok: false, message: `daily loss limit ${cfg.DAILY_LOSS_LIMIT_SOL} SOL hit` }); flow.emit({ node: 'errors', type: 'error', from: 'risk', ok: false, message: `daily loss limit hit — no new buys` }); } return; }
     if (this._lossLogged && this._lossLogged !== dayKey()) this._lossLogged = null;
-    if (this.open().length + this.busy.size >= cfg.MAX_OPEN_POSITIONS) return;
+    if (this.open().length + this.busy.size >= cfg.MAX_OPEN_POSITIONS) { flow.emit({ node: 'risk', type: 'reject', ok: false, message: `max open positions (${cfg.MAX_OPEN_POSITIONS})` }); return; }
     if (Date.now() - this.lastBuyAt < 5000) return;
     for (const c of this.candidates()) {
       if (this.open().length + this.busy.size >= cfg.MAX_OPEN_POSITIONS) break;
       this.tried.add(c.t.mint);
+      flow.emit({ node: c.agent, type: 'candidate', mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, from: 'rpc', message: c.why });
       const bad = await this.rugCheck(c.t, c.agent);
-      if (bad) { this.log(`skipped ${$(c.t)} - ${bad}`, 'skip'); continue; }
+      if (bad) {
+        this.log(`skipped ${$(c.t)} - ${bad}`, 'skip');
+        flow.emit({ node: 'rugs', type: 'reject', ok: false, mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, from: c.agent, message: `rejected ${$(c.t)} — ${bad}`, data: { reason: bad } });
+        flow.emit({ node: 'errors', type: 'reject', from: 'rugs', ok: false, mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, message: `skipped ${$(c.t)} — ${bad}` });
+        continue;
+      }
+      flow.emit({ node: 'rugs', type: 'pass', ok: true, mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, from: c.agent, message: `passed rug filters · ${$(c.t)}` });
+      flow.emit({ node: 'risk', type: 'pass', ok: true, mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, from: c.agent, message: `risk cleared for ${$(c.t)}` });
       await this.enter(c);
       break; // one entry per tick
     }
@@ -248,10 +265,11 @@ class Engine {
 
   async enter({ t, agent, why }) {
     const size = this.settings.tradeSize;
-    if (this.trader.live) { const b = await this.trader.balanceSol(); if (b === null || b < size + 0.01) { this.log(`skipped ${$(t)} - wallet balance too low`, 'err'); return; } }
+    if (this.trader.live) { const b = await this.trader.balanceSol(); if (b === null || b < size + 0.01) { this.log(`skipped ${$(t)} - wallet balance too low`, 'err'); flow.emit({ node: 'risk', type: 'reject', ok: false, mint: t.mint, symbol: t.symbol, agent, message: `skipped ${$(t)} — wallet balance too low` }); flow.emit({ node: 'errors', type: 'error', from: 'risk', ok: false, message: 'wallet balance too low for buy' }); return; } }
     this.busy.add(t.mint); this.lastBuyAt = Date.now();
     try {
       this.log(why, agent);
+      flow.emit({ node: 'buy', type: 'buy', mint: t.mint, symbol: t.symbol, agent, from: 'risk', message: `buying ${$(t)} · ${size} SOL`, data: { sizeSol: size, paper: !this.trader.live } });
       const priceAtEntry = t.price;
       const r = await this.trader.buy(t, size, this.settings);
       await this.market.imageFor(t);
@@ -263,7 +281,10 @@ class Engine {
       this.trades.push(p); this.market.pinned.add(t.mint); this.market.subscribeTrades([t.mint]); ticks.markTraded(t.mint); ticks.record(t, true);
       await store.get().saveTrade(p);
       await this.persistSnapshot();
-    } catch (e) { this.log(`buy ${$(t)} failed: ${e.message}`, 'err'); }
+      flow.emit({ node: 'buy', type: 'buy', ok: true, mint: t.mint, symbol: t.symbol, agent, from: 'risk', message: `bought ${$(t)} · ${r.costSol.toFixed(4)} SOL`, data: { costSol: r.costSol, tokens: r.tokens, paper: r.paper } });
+      flow.emit({ node: 'db', type: 'write', ok: true, mint: t.mint, symbol: t.symbol, agent, from: 'buy', message: `saved open trade ${$(t)}` });
+      flow.emit({ node: 'monitor', type: 'open', mint: t.mint, symbol: t.symbol, agent, from: 'buy', message: `now tracking ${$(t)}` });
+    } catch (e) { this.log(`buy ${$(t)} failed: ${e.message}`, 'err'); flow.emit({ node: 'buy', type: 'error', ok: false, mint: t.mint, symbol: t.symbol, agent, message: `buy ${$(t)} failed: ${e.message}` }); flow.emit({ node: 'errors', type: 'error', from: 'buy', ok: false, mint: t.mint, symbol: t.symbol, agent, message: `buy ${$(t)} failed: ${e.message}` }); }
     finally { this.busy.delete(t.mint); }
   }
 
@@ -276,7 +297,10 @@ class Engine {
     if (ret >= a.tp) reason = `take profit +${Math.round(ret * 100)}%`;
     else if (ret <= -a.sl) reason = `stop loss ${Math.round(ret * 100)}%`;
     else if (Date.now() - p.openedAt > a.maxHoldMs) reason = `max hold ${Math.round(a.maxHoldMs / 60000)}m`;
-    if (reason) await this.exit(p, reason);
+    if (reason) {
+      flow.emit({ node: 'exits', type: 'exit', mint: p.mint, symbol: p.symbol, agent: p.agent, from: 'monitor', message: `${$(p)} · ${reason}`, data: { reason, ret } });
+      await this.exit(p, reason);
+    }
   }
 
   async persistSnapshot() {
@@ -304,7 +328,10 @@ class Engine {
       const amt = this.market.solUsd ? `${usd >= 0 ? '+' : '-'}$${Math.abs(usd).toFixed(2)}` : `${p.pnlSol.toFixed(4)} SOL`;
       this.log(`closed ${$(p)} ${p.pnlSol >= 0 ? '+' : ''}${Math.round(p.pnlPct * 100)}% (${amt}) · ${reason}`, p.pnlSol >= 0 ? 'win' : 'loss', { sig: r.sig });
       this.event('trade', { tradeId: p.id, symbol: p.symbol, image: p.image, pnlSol: p.pnlSol, usd, win: p.pnlSol > 0 });
-    } catch (e) { this.log(`sell ${$(p)} failed: ${e.message} (will retry)`, 'err'); }
+      flow.emit({ node: 'sell', type: 'sell', ok: true, mint: p.mint, symbol: p.symbol, agent: p.agent, from: 'exits', message: `sold ${$(p)} ${p.pnlSol >= 0 ? '+' : ''}${Math.round(p.pnlPct * 100)}% · ${reason}`, data: { pnlSol: p.pnlSol, pnlPct: p.pnlPct, reason, paper: p.paper } });
+      flow.emit({ node: 'db', type: 'write', ok: true, mint: p.mint, symbol: p.symbol, from: 'sell', message: `saved closed trade ${$(p)}` });
+      flow.emit({ node: 'share', type: 'ready', mint: p.mint, symbol: p.symbol, from: 'sell', message: `share / replay ready for ${$(p)}` });
+    } catch (e) { this.log(`sell ${$(p)} failed: ${e.message} (will retry)`, 'err'); flow.emit({ node: 'sell', type: 'error', ok: false, mint: p.mint, symbol: p.symbol, agent: p.agent, message: `sell ${$(p)} failed: ${e.message}` }); flow.emit({ node: 'errors', type: 'error', from: 'sell', ok: false, mint: p.mint, symbol: p.symbol, message: `sell ${$(p)} failed: ${e.message}` }); }
     finally { this.busy.delete(p.id); }
   }
 }

@@ -48,6 +48,19 @@ async function init() {
       create table if not exists ${ident('coin_stats')} (mint text primary key, data jsonb not null);
       create table if not exists ${ident('positions')} (id text primary key, data jsonb not null, opened_at bigint not null);
       create table if not exists ${ident('account_snapshots')} (at bigint primary key, data jsonb not null);
+      create table if not exists ${ident('flow_events')} (
+        id bigint primary key,
+        at bigint not null,
+        node text not null,
+        type text,
+        mint text,
+        symbol text,
+        agent text,
+        ok boolean,
+        message text,
+        data jsonb
+      );
+      create index if not exists flow_events_at_idx on ${ident('flow_events')} (at desc);
     `;
     await pool.query(ddl);
     const savePos = (t) => pool.query(`insert into ${ident('positions')} (id,data,opened_at) values ($1,$2,$3) on conflict (id) do update set data=excluded.data`, [t.id, t, t.openedAt]);
@@ -87,6 +100,31 @@ async function init() {
       listCoinStats: async () => (await pool.query(`select data from ${ident('coin_stats')}`)).rows.map(r => r.data),
       saveSnapshot: (data) => pool.query(`insert into ${ident('account_snapshots')} (at,data) values ($1,$2) on conflict (at) do update set data=excluded.data`, [Date.now(), data]),
       listSnapshots: async (limit) => (await pool.query(`select at, data from ${ident('account_snapshots')} order by at desc limit $1`, [limit || 200])).rows,
+      saveFlowEvents: async (rows) => {
+        if (!rows.length) return;
+        const vals = [], args = [];
+        let i = 1;
+        for (const r of rows) {
+          vals.push(`($${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++})`);
+          args.push(r.id, r.at, r.node, r.type || null, r.mint || null, r.symbol || null, r.agent || null, r.ok == null ? null : !!r.ok, r.message || null, r.data != null ? r.data : null);
+        }
+        await pool.query(`insert into ${ident('flow_events')} (id,at,node,type,mint,symbol,agent,ok,message,data) values ${vals.join(',')} on conflict (id) do nothing`, args);
+      },
+      listFlowEvents: async ({ since, limit } = {}) => {
+        const lim = Math.min(limit || 2000, 5000);
+        if (since) {
+          return (await pool.query(`select id, at, node, type, mint, symbol, agent, ok, message, data from ${ident('flow_events')} where id>$1 order by id asc limit $2`, [since, lim])).rows;
+        }
+        const rows = (await pool.query(`select id, at, node, type, mint, symbol, agent, ok, message, data from ${ident('flow_events')} order by id desc limit $1`, [lim])).rows;
+        return rows.reverse();
+      },
+      capFlowEvents: async (max) => {
+        await pool.query(`delete from ${ident('flow_events')} where id < coalesce((select id from ${ident('flow_events')} order by id desc offset $1 limit 1), 0)`, [max]);
+      },
+      maxFlowEventId: async () => {
+        const r = await pool.query(`select max(id) as m from ${ident('flow_events')}`);
+        return Number(r.rows[0] && r.rows[0].m) || 0;
+      },
     };
   } else {
     fs.mkdirSync(cfg.DATA_DIR, { recursive: true });
@@ -98,7 +136,20 @@ async function init() {
              create table if not exists ticks (mint text not null, at integer not null, price real not null, mcap_sol real, primary key (mint, at));
              create table if not exists coin_stats (mint text primary key, data text not null);
              create table if not exists positions (id text primary key, data text not null, opened_at integer not null);
-             create table if not exists account_snapshots (at integer primary key, data text not null);`);
+             create table if not exists account_snapshots (at integer primary key, data text not null);
+             create table if not exists flow_events (
+               id integer primary key,
+               at integer not null,
+               node text not null,
+               type text,
+               mint text,
+               symbol text,
+               agent text,
+               ok integer,
+               message text,
+               data text
+             );
+             create index if not exists flow_events_at_idx on flow_events (at desc);`);
     const up = db.prepare(`insert into trades (id,data,opened_at) values (?,?,?) on conflict(id) do update set data=excluded.data`);
     const kvGet = db.prepare(`select v from kv where k=?`);
     const kvSet = db.prepare(`insert into kv (k,v) values (?,?) on conflict(k) do update set v=excluded.v`);
@@ -111,6 +162,11 @@ async function init() {
     const upPos = db.prepare(`insert into positions (id,data,opened_at) values (?,?,?) on conflict(id) do update set data=excluded.data`);
     const delPos = db.prepare(`delete from positions where id=?`);
     const upSnap = db.prepare(`insert into account_snapshots (at,data) values (?,?) on conflict(at) do update set data=excluded.data`);
+    const insFlow = db.prepare(`insert into flow_events (id,at,node,type,mint,symbol,agent,ok,message,data) values (?,?,?,?,?,?,?,?,?,?) on conflict(id) do nothing`);
+    const insFlows = db.transaction((rows) => {
+      for (const r of rows) insFlow.run(r.id, r.at, r.node, r.type || null, r.mint || null, r.symbol || null, r.agent || null, r.ok == null ? null : (r.ok ? 1 : 0), r.message || null, r.data != null ? JSON.stringify(r.data) : null);
+    });
+    const parseFlow = (r) => ({ ...r, ok: r.ok == null ? null : !!r.ok, data: r.data ? JSON.parse(r.data) : null });
     impl = {
       kind: 'sqlite',
       schema: 'main',
@@ -129,6 +185,19 @@ async function init() {
       listCoinStats: async () => db.prepare(`select data from coin_stats`).all().map(r => JSON.parse(r.data)),
       saveSnapshot: async (data) => upSnap.run(Date.now(), JSON.stringify(data)),
       listSnapshots: async (limit) => db.prepare(`select at, data from account_snapshots order by at desc limit ?`).all(limit || 200).map((r) => ({ at: r.at, data: JSON.parse(r.data) })),
+      saveFlowEvents: async (rows) => insFlows(rows),
+      listFlowEvents: async ({ since, limit } = {}) => {
+        const lim = Math.min(limit || 2000, 5000);
+        if (since) return db.prepare(`select id, at, node, type, mint, symbol, agent, ok, message, data from flow_events where id>? order by id asc limit ?`).all(since, lim).map(parseFlow);
+        return db.prepare(`select id, at, node, type, mint, symbol, agent, ok, message, data from flow_events order by id desc limit ?`).all(lim).map(parseFlow).reverse();
+      },
+      capFlowEvents: async (max) => {
+        db.prepare(`delete from flow_events where id not in (select id from flow_events order by id desc limit ?)`).run(max);
+      },
+      maxFlowEventId: async () => {
+        const r = db.prepare(`select max(id) as m from flow_events`).get();
+        return Number(r && r.m) || 0;
+      },
     };
   }
   return impl;

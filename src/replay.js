@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 const Replay = require('../public/replay.js');
 const card = require('../public/share-card.js');
+const flow = require('./flow');
 
 let Resvg;
 function resvg() {
@@ -31,6 +32,10 @@ function isBusy() { return busy; }
 async function renderMp4({ data, theme, aspect, seconds, bgImage }) {
   if (busy) { const e = new Error('A replay is already rendering. Try again in a moment.'); e.status = 429; throw e; }
   busy = true;
+  try {
+    const sym = data && data.symbol ? String(data.symbol).replace(/^\$/, '') : '';
+    flow.emit({ node: 'share', type: 'replay', mint: data && data.mint, symbol: sym || undefined, message: sym ? ('rendering replay for $' + sym) : 'rendering account replay', data: { aspect, theme } });
+  } catch {}
   const L = Replay.layout(aspect);
   const dur = Math.max(8, Math.min(15, seconds || Replay.durationOf(data)));
   const frames = Math.round(dur * Replay.FPS);

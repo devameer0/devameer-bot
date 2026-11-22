@@ -49,7 +49,14 @@ $('#loginForm').onsubmit = async (e) => {
 $$('.nav [data-go]').forEach(b => b.onclick = () => {
   $$('.nav [data-go]').forEach(x => x.classList.toggle('on', x === b));
   $$('.tab').forEach(t => t.classList.toggle('hidden', t.dataset.tab !== b.dataset.go));
+  const flowOn = b.dataset.go === 'flow';
+  $('#app').classList.toggle('flow-open', flowOn);
   $('#floatTerm').classList.toggle('hidden', b.dataset.go !== 'home');
+  if (window.DevameerFlow) {
+    if (flowOn) DevameerFlow.open();
+    else DevameerFlow.close();
+  }
+  try { if (flowOn) location.hash = 'flow'; else if (location.hash === '#flow') history.replaceState(null, '', location.pathname + location.search); } catch {}
   window.scrollTo(0, 0);
 });
 
@@ -128,6 +135,12 @@ function confetti() {
 function render() {
   const s = S.summary;
   $('#app').classList.remove('hidden');
+  if (window.DevameerFlow) DevameerFlow.setStatus({ mode: S.mode, running: S.running, dryRun: S.dryRun });
+  if (!render._openedFlow && location.hash === '#flow') {
+    render._openedFlow = true;
+    const fb = document.querySelector('.nav [data-go="flow"]');
+    if (fb) fb.click();
+  }
   $('#botName').textContent = S.bot.name; $('#badge').textContent = S.bot.badge;
   $$('.tn').forEach(e => e.textContent = S.bot.name);
   const mt = $('#modeTag'); mt.textContent = S.mode; mt.classList.toggle('live', S.mode === 'LIVE');

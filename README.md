@@ -68,3 +68,9 @@ In the share sheet and replay dialog you can upload a **photo (≤5 MB)** or **v
 
 ## Persistent history
 On Render's free plan the local SQLite file is wiped on every restart. Set `DATABASE_URL` (or `SUPABASE_DB_URL`) to a Postgres database (Supabase) so trades, open positions, price ticks, coin history, and account snapshots survive deploys. Optional `DATABASE_SCHEMA` (default `devameer_bot` when the URL is a Supabase host). Without `DATABASE_URL`, the bot still uses SQLite in `DATA_DIR` for local previews.
+
+
+## Flow (live pipeline)
+Admins get a **Flow** tab that draws the real bot pipeline in an n8n-style canvas (dark/light). Nodes follow the code path: PumpPortal feed, Jupiter price, Solana RPC / curve reads, rug filters (pass/reject), the four agents, risk checks, buy, position monitor, exits, sell, database, share/replay, withdraw, and errors/alerts.
+
+Every meaningful activity is emitted on an internal event bus (no secrets — keys, passwords, and connection strings are stripped), streamed to the browser over SSE (`/api/flow/stream`), and kept in a ring buffer plus a capped `flow_events` table (last 5,000). The canvas pulses nodes and sends a particle along the edge; a terminal-style activity log under the graph can be filtered, paused, searched, and exported as CSV/JSON. Click a node for its current read-only config and the latest events as JSON.
