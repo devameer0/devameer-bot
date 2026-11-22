@@ -20,15 +20,24 @@ async function afterTrade(savePos, delPos, t) {
 async function init() {
   if (cfg.DATABASE_URL) {
     const { Pool } = require('pg');
+    // Strip sslmode from the URL so pg does not force verify-full (Render + Supabase
+    // pooler often present a chain Node rejects). We still use TLS, without CA pinning.
+    let conn = cfg.DATABASE_URL;
+    try {
+      const u = new URL(conn);
+      u.searchParams.delete('sslmode');
+      u.searchParams.set('sslmode', 'no-verify');
+      conn = u.toString();
+    } catch { /* keep raw */ }
     const pool = new Pool({
-      connectionString: cfg.DATABASE_URL,
+      connectionString: conn,
       ssl: /localhost|127\.0\.0\.1/.test(cfg.DATABASE_URL) ? false : { rejectUnauthorized: false },
       max: 4,
       idleTimeoutMillis: 10000,
     });
     const schema = (cfg.DATABASE_SCHEMA || 'public').replace(/[^a-zA-Z0-9_]/g, '') || 'public';
     if (schema !== 'public') {
-      await pool.query('create schema if not exists "' + schema + '"');
+      // Schema is provisioned ahead of time; the app role may not have CREATE.
       await pool.query('set search_path to "' + schema + '"');
       pool.on('connect', (c) => { c.query('set search_path to "' + schema + '"').catch(() => {}); });
     }
