@@ -34,6 +34,17 @@
     pinch: null,
     live: false,
     t0: performance.now(),
+    holdLive: false,
+    queued: [],
+    freezeWorld: false,
+    rec: null,
+    onCaptureFrame: null,
+  };
+
+  const clock = {
+    useSim: false,
+    sim: 0,
+    now() { return this.useSim ? this.sim : performance.now(); },
   };
 
   const isMob = () => Math.min(window.innerWidth, window.innerHeight) < 720 || 'ontouchstart' in window;
@@ -179,7 +190,7 @@
       fate: fate || 'run', // run | reject | pass
       color: nodeById(from)?.color || '#3B82F6',
       x: 0, y: 0, vy: 0, falling: false, alpha: 1,
-      at: performance.now(),
+      at: clock.now(),
     };
     state.chips.push(chip);
     if (symbol) state.chipBySymbol.set(String(symbol).replace(/^\$/, '').toUpperCase(), chip);
@@ -193,11 +204,13 @@
     return 0.85;
   }
 
-  function onEvent(ev) {
+  function onEvent(ev, opts) {
     if (!ev || ev.type === 'hello') {
       if (ev && ev.status) setStatus(ev.status);
       return;
     }
+    const nowTs = (opts && opts.now != null) ? opts.now : clock.now();
+    const silent = !!(opts && opts.silent);
     const n = ev.node;
     const st = state.stats[n] || (state.stats[n] = { events: 0, passes: 0, rejects: 0, errors: 0, lastAt: 0, lastMessage: '' });
     st.events++; st.lastAt = ev.at || Date.now(); st.lastMessage = ev.message || ev.type || '';
@@ -206,7 +219,10 @@
     if (ev.type === 'error') st.errors++;
     state.lastEv[n] = ev;
     const pow = powerOf(ev);
-    state.pulse.set(n, { at: performance.now(), pow, err: ev.ok === false || ev.type === 'error' || ev.type === 'reject' });
+    if (silent) {
+      return;
+    }
+    state.pulse.set(n, { at: nowTs, pow, err: ev.ok === false || ev.type === 'error' || ev.type === 'reject' });
 
     const from = ev.from;
     const edge = findEdge(from, n);
@@ -246,7 +262,7 @@
         state.pnl.sell = pct;
       }
       if (pct != null && pct > 0) {
-        state.pulse.set('exits', { at: performance.now(), pow: 2, err: false, win: true });
+        state.pulse.set('exits', { at: nowTs, pow: 2, err: false, win: true });
         const ex = findEdge('exits', 'sell') || findEdge('monitor', 'exits');
         if (ex) { addHeat(ex.id, 1); spawnParticles(ex.id, 18, '#22C55E', 1.4); }
       }
@@ -254,9 +270,9 @@
 
     const nd = nodeById(n);
     if (nd) {
-      state.activity.push({ x: nd.x, y: nd.y, at: performance.now(), w: pow });
+      state.activity.push({ x: nd.x, y: nd.y, at: nowTs, w: pow });
       if (state.activity.length > 20) state.activity.shift();
-      state.focus.at = performance.now();
+      state.focus.at = nowTs;
     }
   }
 
@@ -274,20 +290,26 @@
     $('#liveDot')?.classList.toggle('off', !on);
   }
 
-  function computeFit() {
+  function viewSize() {
     const wrap = $('#wrap');
-    if (!wrap || !state.nodes.length) return;
+    if (!wrap) return { w: 1, h: 1 };
     const r = wrap.getBoundingClientRect();
+    return { w: r.width, h: r.height };
+  }
+  function computeFit(viewW, viewH) {
+    if (!state.nodes.length) return state.fit;
+    const implicit = viewW == null || viewH == null;
+    if (implicit) { const v = viewSize(); viewW = v.w; viewH = v.h; }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of state.nodes) {
       minX = Math.min(minX, n.x - 110); maxX = Math.max(maxX, n.x + 130);
       minY = Math.min(minY, n.y - 90); maxY = Math.max(maxY, n.y + 110);
     }
     const w = Math.max(200, maxX - minX), h = Math.max(200, maxY - minY);
-    const k = Math.max(0.22, Math.min(1.35, Math.min((r.width - 48) / w, (r.height - 48) / h)));
-    state.fit.k = k;
-    state.fit.x = (r.width - w * k) / 2 - minX * k;
-    state.fit.y = (r.height - h * k) / 2 - minY * k;
+    const k = Math.max(0.22, Math.min(1.35, Math.min((viewW - 48) / w, (viewH - 48) / h)));
+    const fit = { k, x: (viewW - w * k) / 2 - minX * k, y: (viewH - h * k) / 2 - minY * k };
+    if (implicit) state.fit = fit;
+    return fit;
   }
   function goFit(immediate) {
     computeFit();
@@ -305,49 +327,49 @@
     return { minX, minY, maxX, maxY };
   }
 
-  function clampCam(tx, ty, k) {
-    const wrap = $('#wrap').getBoundingClientRect();
+  function clampCam(tx, ty, k, viewW, viewH, fit) {
+    if (viewW == null) { const v = viewSize(); viewW = v.w; viewH = v.h; }
     const { minX, minY, maxX, maxY } = nodeBounds();
     const pad = 20;
-    const minTx = wrap.width - pad - maxX * k;
+    const minTx = viewW - pad - maxX * k;
     const maxTx = pad - minX * k;
-    const minTy = wrap.height - pad - maxY * k;
+    const minTy = viewH - pad - maxY * k;
     const maxTy = pad - minY * k;
+    const fb = fit || state.fit;
     if (minTx <= maxTx) tx = Math.min(maxTx, Math.max(minTx, tx));
-    else tx = state.fit.x;
+    else tx = fb.x;
     if (minTy <= maxTy) ty = Math.min(maxTy, Math.max(minTy, ty));
-    else ty = state.fit.y;
+    else ty = fb.y;
     return { tx, ty };
   }
 
-  function updateCamera(dt, now) {
-    if (now - state.cam.userAt > IDLE_RESUME_MS) state.cam.auto = true;
-    if (state.cam.auto) {
-      computeFit();
-      // Only meaningful events (pass/reject/buy/sell/exit) pull the camera.
-      // Token/tick floods would otherwise pin the view on the left feed cluster.
+  function updateCamera(dt, now, cam, viewW, viewH, fit) {
+    cam = cam || state.cam;
+    if (viewW == null) { const v = viewSize(); viewW = v.w; viewH = v.h; }
+    if (!fit) fit = (cam === state.cam) ? (computeFit(), state.fit) : computeFit(viewW, viewH);
+    if (now - (cam.userAt || 0) > IDLE_RESUME_MS) cam.auto = true;
+    if (cam.auto) {
       const recent = state.activity.filter((a) => now - a.at < 3500 && a.w >= 1.1);
       if (recent.length && now - state.focus.at < 8000) {
         let sx = 0, sy = 0, sw = 0;
         for (const a of recent) { sx += a.x * a.w; sy += a.y * a.w; sw += a.w; }
         const cx = sx / sw, cy = sy / sw;
-        const wrap = $('#wrap').getBoundingClientRect();
-        const k = state.fit.k * 1.05;
+        const k = fit.k * 1.05;
         const blend = 0.22;
-        let tx = state.fit.x * (1 - blend) + (wrap.width / 2 - cx * k) * blend;
-        let ty = state.fit.y * (1 - blend) + (wrap.height / 2 - cy * k) * blend;
-        const c = clampCam(tx, ty, k);
-        state.cam.tk = k;
-        state.cam.tx = c.tx;
-        state.cam.ty = c.ty;
+        let tx = fit.x * (1 - blend) + (viewW / 2 - cx * k) * blend;
+        let ty = fit.y * (1 - blend) + (viewH / 2 - cy * k) * blend;
+        const c = clampCam(tx, ty, k, viewW, viewH, fit);
+        cam.tk = k;
+        cam.tx = c.tx;
+        cam.ty = c.ty;
       } else {
-        state.cam.tx = state.fit.x; state.cam.ty = state.fit.y; state.cam.tk = state.fit.k;
+        cam.tx = fit.x; cam.ty = fit.y; cam.tk = fit.k;
       }
     }
     const ease = 1 - Math.exp(-dt * 2.4);
-    state.cam.x += (state.cam.tx - state.cam.x) * ease;
-    state.cam.y += (state.cam.ty - state.cam.y) * ease;
-    state.cam.k += (state.cam.tk - state.cam.k) * ease;
+    cam.x += (cam.tx - cam.x) * ease;
+    cam.y += (cam.ty - cam.y) * ease;
+    cam.k += (cam.tk - cam.k) * ease;
   }
 
   function markUser() {
@@ -365,11 +387,23 @@
     return state.nodes.find((n) => Math.abs(w.x - n.x) <= 30 && w.y >= n.y - 30 && w.y <= n.y + 62) || null;
   }
 
-  function draw(now, dt) {
-    const canvas = $('#cv');
+  function stepShown(dt) {
+    for (const n of state.nodes) {
+      const st = state.stats[n.id] || { events: 0, passes: 0, rejects: 0 };
+      const sh = state.shown[n.id] || (state.shown[n.id] = { e: 0, p: 0, r: 0, pnl: 0 });
+      sh.e += (st.events - sh.e) * Math.min(1, dt * 7);
+      sh.p += (st.passes - sh.p) * Math.min(1, dt * 7);
+      sh.r += ((st.rejects || 0) - sh.r) * Math.min(1, dt * 7);
+      if (n.id === 'exits' && state.pnl.exits != null) sh.pnl += (state.pnl.exits - sh.pnl) * Math.min(1, dt * 6);
+    }
+  }
+
+  function draw(now, dt, target) {
+    const canvas = (target && target.canvas) || $('#cv');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const dpr = canvas._dpr || 1;
+    const dpr = (target && target.dpr) || canvas._dpr || 1;
+    const cam = (target && target.cam) || state.cam;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#0B0B0D';
@@ -378,14 +412,14 @@
     // screen-space dot grid
     const step = 22 * dpr;
     ctx.fillStyle = 'rgba(255,255,255,0.045)';
-    const ox = (state.cam.x * dpr) % step, oy = (state.cam.y * dpr) % step;
+    const ox = (cam.x * dpr) % step, oy = (cam.y * dpr) % step;
     for (let x = ox; x < canvas.width; x += step) {
       for (let y = oy; y < canvas.height; y += step) {
         ctx.beginPath(); ctx.arc(x, y, 1.05 * dpr, 0, 7); ctx.fill();
       }
     }
 
-    ctx.setTransform(dpr * state.cam.k, 0, 0, dpr * state.cam.k, dpr * state.cam.x, dpr * state.cam.y);
+    ctx.setTransform(dpr * cam.k, 0, 0, dpr * cam.k, dpr * cam.x, dpr * cam.y);
 
     // edges
     for (const e of state.edges) {
@@ -475,16 +509,11 @@
       // rolling counters inside the node
       const st = state.stats[n.id] || { events: 0, passes: 0, rejects: 0 };
       const sh = state.shown[n.id] || (state.shown[n.id] = { e: 0, p: 0, r: 0, pnl: 0 });
-      sh.e += (st.events - sh.e) * Math.min(1, dt * 7);
-      sh.p += (st.passes - sh.p) * Math.min(1, dt * 7);
-      sh.r += ((st.rejects || 0) - sh.r) * Math.min(1, dt * 7);
       const evN = Math.round(sh.e);
       ctx.font = '700 8px Inter,system-ui,sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillStyle = 'rgba(255,255,255,0.8)';
       if (n.id === 'exits' && state.pnl.exits != null) {
-        const pct = state.pnl.exits;
-        sh.pnl += (pct - sh.pnl) * Math.min(1, dt * 6);
         ctx.fillStyle = sh.pnl >= 0 ? '#86EFAC' : '#FCA5A5';
         ctx.fillText((sh.pnl >= 0 ? '+' : '') + Math.round(sh.pnl * 100) + '%', 0, NODE / 2 - 9);
       } else if (evN) {
@@ -507,7 +536,57 @@
         ctx.fillText(bits.join(' · '), n.x, n.y + NODE / 2 + 34);
       }
     }
+
+    if (target && target.watermark) {
+      const cssW = canvas.width / dpr, cssH = canvas.height / dpr;
+      drawWatermark(ctx, cssW, cssH, dpr);
+    }
   }
+
+  function drawWatermark(ctx, cssW, cssH, dpr) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const scale = Math.max(0.85, Math.min(cssW, cssH) / 1080);
+    const x = 28 * scale, y = 28 * scale;
+    ctx.save();
+    ctx.font = '700 ' + Math.round(22 * scale) + 'px Inter,system-ui,sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.7)';
+    ctx.shadowBlur = 8 * scale;
+    ctx.fillStyle = '#FAFAFA';
+    const title = 'Devameer Bot Pipeline';
+    ctx.fillText(title, x, y);
+    const tw = ctx.measureText(title).width;
+    let px = x + tw + 14 * scale;
+    const pulse = 0.5 + 0.5 * Math.sin((nowOf() / 1200) * Math.PI * 2);
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(34,197,94,' + (0.55 + 0.45 * pulse) + ')';
+    ctx.shadowColor = '#22C55E';
+    ctx.shadowBlur = 10 * scale;
+    ctx.arc(px + 5 * scale, y, 5 * scale, 0, 7);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.font = '800 ' + Math.round(11 * scale) + 'px Inter,system-ui,sans-serif';
+    ctx.fillStyle = '#86EFAC';
+    ctx.fillText('LIVE', px + 14 * scale, y);
+    const liveW = ctx.measureText('LIVE').width;
+    px += 14 * scale + liveW + 12 * scale;
+    const mode = state.status.mode || (state.status.dryRun ? 'PAPER' : 'LIVE');
+    const paper = mode !== 'LIVE';
+    const label = paper ? 'PAPER' : 'LIVE';
+    ctx.font = '800 ' + Math.round(10 * scale) + 'px Inter,system-ui,sans-serif';
+    const pw = ctx.measureText(label).width + 16 * scale;
+    const ph = 18 * scale;
+    ctx.fillStyle = paper ? '#27272A' : '#14532D';
+    ctx.beginPath();
+    ctx.roundRect(px, y - ph / 2, pw, ph, ph / 2);
+    ctx.fill();
+    ctx.fillStyle = paper ? '#FCD34D' : '#86EFAC';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, px + pw / 2, y);
+    ctx.restore();
+  }
+  function nowOf() { return clock.now(); }
 
   function stepChips(dt) {
     const next = [];
@@ -544,7 +623,7 @@
         if (ne) {
           c.edge = ne.id; c.t = 0; c.color = nodeById(ne.from)?.color || c.color;
           next.push(c);
-        } else if (performance.now() - c.at < 9000 && c.fate === 'run' && dest === 'rugs') {
+        } else if (clock.now() - c.at < 9000 && c.fate === 'run' && dest === 'rugs') {
           // wait briefly at rugs for a pass/reject
           c.t = 1;
           const pt = bez(p, 1);
@@ -567,19 +646,11 @@
     state.chips = next;
   }
 
-  function tick(ts) {
-    if (!state.open) { state.raf = 0; return; }
-    if (!tick._last) tick._last = ts;
-    const dt = Math.min(0.05, (ts - tick._last) / 1000);
-    tick._last = ts;
-    const now = ts;
-
-    // decay heat, ambient life
+  function stepPhysics(dt, now) {
     for (const [id, h] of [...state.heat]) {
       const nh = h * Math.exp(-dt * 1.35);
       if (nh < 0.01) state.heat.delete(id); else state.heat.set(id, nh);
     }
-    // ambient trickle on feed-related edges so the graph never freezes
     const ambient = ['feed-rugs', 'rpc-rugs', 'rpc-monitor', 'feed-monitor', 'jupiter-buy'];
     for (const id of ambient) {
       if (Math.random() < dt * (0.9 + (id.startsWith('feed') ? 1.2 * (0.5 + 0.5 * Math.sin(now / 900)) : 0.4))) {
@@ -587,18 +658,39 @@
         spawnParticles(id, 1, undefined, 0.7);
       }
     }
-
-    // move particles
     const keep = [];
     for (const p of state.particles) {
       p.t += p.speed * dt;
       if (p.t < 1) keep.push(p);
     }
     state.particles = keep;
-
     stepChips(dt);
-    updateCamera(dt, now);
+  }
+
+  function stepWorld(dt, now) {
+    const sub = Math.max(1, Math.ceil(dt / 0.05));
+    const sdt = dt / sub;
+    for (let i = 0; i < sub; i++) {
+      const t = now - (sub - 1 - i) * sdt * 1000;
+      stepPhysics(sdt, t);
+    }
+    stepShown(dt);
+  }
+
+  function tick(ts) {
+    if (!state.open) { state.raf = 0; return; }
+    if (!tick._last) tick._last = ts;
+    const dt = Math.min(0.05, (ts - tick._last) / 1000);
+    tick._last = ts;
+    const now = clock.useSim ? clock.sim : ts;
+    if (!state.freezeWorld) {
+      stepWorld(dt, now);
+      updateCamera(dt, now);
+    }
     draw(now, dt);
+    if (typeof state.onCaptureFrame === 'function') {
+      try { state.onCaptureFrame(now, dt); } catch (e) { console.warn(e); }
+    }
     state.raf = requestAnimationFrame(tick);
   }
 
@@ -745,7 +837,7 @@
     for (const ev of evs.slice(-12)) {
       const edge = findEdge(ev.from, ev.node);
       if (edge) { addHeat(edge.id, 0.4); spawnParticles(edge.id, 4, nodeById(ev.from)?.color, 1); }
-      if (ev.node) state.pulse.set(ev.node, { at: performance.now(), pow: 0.6 });
+      if (ev.node) state.pulse.set(ev.node, { at: clock.now(), pow: 0.6 });
     }
   }
   function connectSSE() {
@@ -753,7 +845,13 @@
     const es = new EventSource('/api/flow/stream');
     state.sse = es;
     setLive(true);
-    es.onmessage = (m) => { try { onEvent(JSON.parse(m.data)); } catch {} };
+    es.onmessage = (m) => {
+      try {
+        const ev = JSON.parse(m.data);
+        if (state.holdLive) state.queued.push(ev);
+        else onEvent(ev);
+      } catch {}
+    };
     es.onerror = () => setLive(false);
     es.onopen = () => setLive(true);
   }
@@ -778,5 +876,146 @@
     setLive(false);
   }
 
-  window.DevameerPipeline = { open, close, resize, fit: () => goFit(false), setStatus };
+  function aspectSize(aspect) {
+    if (aspect === '9:16' || aspect === 'portrait') return { W: 1080, H: 1920 };
+    if (aspect === '1:1' || aspect === 'square') return { W: 1080, H: 1080 };
+    return { W: 1920, H: 1080 };
+  }
+
+  function ensureRecCanvas(W, H) {
+    let c = state.rec && state.rec.canvas;
+    if (!c) {
+      c = document.createElement('canvas');
+      c.setAttribute('aria-hidden', 'true');
+      c.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+      document.body.appendChild(c);
+    }
+    c.width = W;
+    c.height = H;
+    const fit = computeFit(W, H);
+    const cam = { x: fit.x, y: fit.y, k: fit.k, tx: fit.x, ty: fit.y, tk: fit.k, auto: true, userAt: 0 };
+    state.rec = { canvas: c, cam, fit, W, H, dpr: 1 };
+    return state.rec;
+  }
+
+  function drawCapture(now, dt) {
+    if (!state.rec) return null;
+    const rec = state.rec;
+    rec.fit = computeFit(rec.W, rec.H);
+    updateCamera(dt || 0.033, now, rec.cam, rec.W, rec.H, rec.fit);
+    draw(now, 0, { canvas: rec.canvas, cam: rec.cam, dpr: 1, watermark: true });
+    return rec.canvas;
+  }
+
+  function endCapture() {
+    state.onCaptureFrame = null;
+    if (state.rec && state.rec.canvas && state.rec.canvas.parentNode) {
+      try { state.rec.canvas.width = 1; state.rec.canvas.height = 1; } catch {}
+    }
+  }
+
+  function snapWorld() {
+    return {
+      stats: JSON.parse(JSON.stringify(state.stats)),
+      shown: JSON.parse(JSON.stringify(state.shown)),
+      pnl: { ...state.pnl },
+      lastEv: { ...state.lastEv },
+      particles: state.particles.map((p) => ({ ...p })),
+      chips: state.chips.map((c) => ({ ...c })),
+      chipBySymbol: new Map(state.chipBySymbol),
+      heat: new Map(state.heat),
+      pulse: new Map(state.pulse),
+      cam: { ...state.cam },
+      activity: state.activity.slice(),
+      focus: { ...state.focus },
+    };
+  }
+
+  function restoreWorld(s) {
+    if (!s) return;
+    state.stats = s.stats;
+    state.shown = s.shown;
+    state.pnl = s.pnl;
+    state.lastEv = s.lastEv;
+    state.particles = s.particles;
+    state.chips = s.chips;
+    state.chipBySymbol = s.chipBySymbol;
+    state.heat = s.heat;
+    state.pulse = s.pulse;
+    Object.assign(state.cam, s.cam);
+    state.activity = s.activity;
+    state.focus = s.focus;
+  }
+
+  function clearMotion() {
+    state.particles = [];
+    state.chips = [];
+    state.chipBySymbol = new Map();
+    state.heat = new Map();
+    state.pulse = new Map();
+    state.activity = [];
+    state.focus = { x: 0, y: 0, w: 1, at: 0 };
+  }
+
+  function seedSilent(events) {
+    state.stats = {};
+    state.shown = {};
+    state.pnl = {};
+    state.lastEv = {};
+    for (const ev of events || []) onEvent(ev, { silent: true, now: ev.at });
+    for (const id of Object.keys(state.stats)) {
+      const st = state.stats[id];
+      state.shown[id] = { e: st.events || 0, p: st.passes || 0, r: st.rejects || 0, pnl: state.pnl.exits || 0 };
+    }
+  }
+
+  async function playEvents({ events, preEvents, speed, aspect, onFrame, onProgress }) {
+    const { W, H } = aspectSize(aspect);
+    const rec = ensureRecCanvas(W, H);
+    const evs = (events || []).filter((e) => e && e.type !== 'hello').slice().sort((a, b) => (a.at || 0) - (b.at || 0));
+    const snap = snapWorld();
+    state.holdLive = true;
+    state.freezeWorld = true;
+    clock.useSim = true;
+    try {
+      seedSilent(preEvents || []);
+      clearMotion();
+      const t0 = evs.length ? (evs[0].at || Date.now()) : Date.now();
+      const t1 = evs.length ? (evs[evs.length - 1].at || t0) : t0;
+      clock.sim = t0;
+      rec.fit = computeFit(W, H);
+      rec.cam.x = rec.cam.tx = rec.fit.x;
+      rec.cam.y = rec.cam.ty = rec.fit.y;
+      rec.cam.k = rec.cam.tk = rec.fit.k;
+      rec.cam.auto = true;
+      goFit(true);
+      if (typeof onFrame === 'function') await onFrame({ canvas: rec.canvas, t0, t1, W, H, speed: speed || 1 });
+    } finally {
+      clock.useSim = false;
+      restoreWorld(snap);
+      state.freezeWorld = false;
+      const queued = state.queued.splice(0);
+      state.holdLive = false;
+      for (const ev of queued) { try { onEvent(ev); } catch {} }
+      goFit(false);
+    }
+  }
+
+  window.DevameerPipeline = {
+    open, close, resize, fit: () => goFit(false), setStatus,
+    aspectSize, ensureRecCanvas, drawCapture, endCapture, stepWorld,
+    onEvent, seedSilent, clearMotion, snapWorld, restoreWorld, playEvents,
+    clock,
+    get holdLive() { return state.holdLive; },
+    set holdLive(v) { state.holdLive = !!v; },
+    get freezeWorld() { return state.freezeWorld; },
+    set freezeWorld(v) { state.freezeWorld = !!v; },
+    setCapture(fn) { state.onCaptureFrame = fn; },
+    get rec() { return state.rec; },
+    get status() { return state.status; },
+    flushQueued() {
+      const queued = state.queued.splice(0);
+      for (const ev of queued) { try { onEvent(ev); } catch {} }
+    },
+  };
 })();

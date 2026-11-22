@@ -31,3 +31,22 @@ html,body{height:100%;background:#0B0B0D;color:#FAFAFA;font-family:Inter,system-
   .hud{top:10px;left:10px;gap:8px}
   .hud-name{font-size:12px}
 }
+
+.rec-hud{position:absolute;top:14px;right:14px;z-index:8;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:auto;font-family:Inter,system-ui,sans-serif}
+.rec-btn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:999px;border:1px solid #27272A;background:rgba(20,20,22,.82);color:#FAFAFA;font:700 11px Inter,system-ui,sans-serif;letter-spacing:.2px;cursor:pointer;backdrop-filter:blur(8px)}
+.rec-btn i{width:8px;height:8px;border-radius:50%;background:#EF4444;box-shadow:0 0 8px #EF4444}
+.rec-btn.hot,.rec-btn[aria-expanded="true"]{border-color:#3F3F46;background:#1A1A1C}
+.rec-pop{width:204px;background:rgba(20,20,22,.94);border:1px solid #27272A;border-radius:14px;padding:10px;box-shadow:0 12px 32px rgba(0,0,0,.5);backdrop-filter:blur(12px)}
+.rec-label{font-size:9px;font-weight:700;letter-spacing:.7px;color:#71717A;text-transform:uppercase;margin:8px 0 4px}
+.rec-seg{display:flex;background:#111113;border:1px solid #1F1F22;border-radius:9px;overflow:hidden}
+.rec-seg button{flex:1;border:0;background:transparent;color:#A1A1AA;font:700 10px Inter,system-ui,sans-serif;padding:7px 0;cursor:pointer}
+.rec-seg button.on{background:#27272A;color:#FAFAFA}
+.rec-start{width:100%;margin-top:10px;border:0;border-radius:999px;padding:8px;font:800 11px Inter,system-ui,sans-serif;cursor:pointer;background:#FAFAFA;color:#0A0A0A}
+.rec-status{min-height:14px;margin-top:7px;font-size:10px;line-height:1.35;color:#A1A1AA;word-break:break-word}
+.rec-livebar{display:flex;align-items:center;gap:8px;height:30px;padding:0 8px 0 10px;border-radius:999px;border:1px solid #27272A;background:rgba(20,20,22,.88);backdrop-filter:blur(8px);color:#FAFAFA;font:700 11px Inter,system-ui,sans-serif}
+.rec-pulse{width:8px;height:8px;border-radius:50%;background:#EF4444;box-shadow:0 0 8px #EF4444;animation:pulse 1s ease-in-out infinite}
+.rec-stop{border:0;border-radius:999px;padding:4px 9px;font:800 10px Inter,system-ui,sans-serif;cursor:pointer;background:#EF4444;color:#fff}
+@media (max-width:600px){
+  .rec-hud{top:10px;right:10px}
+  .rec-pop{width:188px}
+}

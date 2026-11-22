@@ -38,10 +38,49 @@
     <span class="live-dot" id="liveDot" title="Streaming"><i></i>LIVE</span>
     <span class="mode-pill paper" id="modePill">PAPER</span>
   </header>
+  <div id="recHud" class="rec-hud">
+    <button type="button" class="rec-btn" id="recToggle" aria-label="Record" aria-expanded="false" title="Record">
+      <i></i><span>Rec</span>
+    </button>
+    <div class="rec-livebar hidden" id="recLiveBar">
+      <span class="rec-pulse"></span>
+      <span id="recTimer">0:00</span>
+      <button type="button" class="rec-stop" id="recStop">Stop</button>
+    </div>
+    <div class="rec-pop hidden" id="recPop">
+      <div class="rec-seg" data-group="mode">
+        <button type="button" data-mode="live" class="on">Live</button>
+        <button type="button" data-mode="replay">Replay</button>
+      </div>
+      <div class="rec-replay hidden" id="recReplayOpts">
+        <div class="rec-label">Last</div>
+        <div class="rec-seg">
+          <button type="button" data-mins="1" class="on">1m</button>
+          <button type="button" data-mins="5">5m</button>
+          <button type="button" data-mins="15">15m</button>
+        </div>
+        <div class="rec-label">Speed</div>
+        <div class="rec-seg">
+          <button type="button" data-speed="1">1x</button>
+          <button type="button" data-speed="2">2x</button>
+          <button type="button" data-speed="4" class="on">4x</button>
+        </div>
+      </div>
+      <div class="rec-label">Format</div>
+      <div class="rec-seg">
+        <button type="button" data-aspect="16:9">16:9</button>
+        <button type="button" data-aspect="9:16" class="on">9:16</button>
+        <button type="button" data-aspect="1:1">1:1</button>
+      </div>
+      <button type="button" class="rec-start" id="recStart">Start live</button>
+      <div class="rec-status" id="recStatus"></div>
+    </div>
+  </div>
   <div id="wrap" class="wrap"><canvas id="cv"></canvas></div>
   <div id="tip" class="tip hidden"></div>
 </section>
 <script src="/pipeline.js"></script>
+<script src="/record.js"></script>
 <script src="/site.js"></script>
 </body>
 </html>

@@ -3,6 +3,9 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const { spawn } = require('child_process');
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
@@ -141,6 +144,64 @@ app.get('/api/flow/stream', requireSession, (req, res) => {
   up.setTimeout(0);
   up.on('error', () => { if (!res.headersSent) res.status(502).json({ error: 'stream unavailable' }); else try { res.end(); } catch {} });
   up.end();
+});
+
+
+function ffmpegBin() {
+  try {
+    const p = require('ffmpeg-static');
+    if (p && fs.existsSync(p)) return p;
+  } catch { /* fall through */ }
+  return 'ffmpeg';
+}
+
+let xcodeBusy = false;
+app.post('/api/flow/transcode', requireSession, express.raw({ type: () => true, limit: '40mb' }), async (req, res) => {
+  if (xcodeBusy) return res.status(429).json({ error: 'A video is already transcoding. Try again in a moment.' });
+  const buf = req.body;
+  if (!buf || !buf.length) return res.status(400).json({ error: 'video required' });
+  if (buf.length > 40 * 1024 * 1024) return res.status(400).json({ error: 'Video must be 40 MB or smaller' });
+  xcodeBusy = true;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devameer-flow-xcode-'));
+  const inn = path.join(tmp, 'in.webm');
+  const out = path.join(tmp, 'out.mp4');
+  try {
+    fs.writeFileSync(inn, buf);
+    await new Promise((resolve, reject) => {
+      const ff = spawn(ffmpegBin(), [
+        '-y', '-hide_banner', '-loglevel', 'error', '-i', inn,
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-crf', '23',
+        '-an', '-movflags', '+faststart', out,
+      ]);
+      let err = '';
+      ff.stderr.on('data', (d) => { err += d; });
+      const to = setTimeout(() => { try { ff.kill('SIGKILL'); } catch {} reject(new Error('transcode timed out')); }, 120000);
+      ff.on('error', (e) => { clearTimeout(to); reject(e); });
+      ff.on('close', (code) => {
+        clearTimeout(to);
+        code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code + (err ? ': ' + err.slice(0, 300) : '')));
+      });
+    });
+    const mp4 = fs.readFileSync(out);
+    if (!mp4 || mp4.length < 1000) throw new Error('empty mp4');
+    res.set({
+      'Content-Type': 'video/mp4',
+      'Content-Disposition': 'attachment; filename="devameer-pipeline.mp4"',
+      'Cache-Control': 'no-store',
+      'Content-Length': mp4.length,
+    });
+    res.end(mp4);
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || 'transcode failed' });
+  } finally {
+    xcodeBusy = false;
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+  }
+});
+
+app.get('/vendor/mp4-muxer.mjs', (req, res) => {
+  res.type('application/javascript');
+  res.sendFile(path.join(__dirname, '..', 'public', 'vendor', 'mp4-muxer.mjs'));
 });
 
 const pub = path.join(__dirname, 'public');
