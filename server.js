@@ -7,6 +7,7 @@ const store = require('./src/db');
 const { Market } = require('./src/market');
 const { Trader } = require('./src/trader');
 const { Engine, AGENTS } = require('./src/engine');
+const share = require('./src/share');
 
 const SECRET = cfg.SESSION_SECRET || crypto.createHash('sha256').update('devameer-bot:' + (cfg.ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex'))).digest('hex');
 const sign = (v) => v + '.' + crypto.createHmac('sha256', SECRET).update(v).digest('hex');
@@ -46,14 +47,23 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   });
   app.post('/api/logout', (req, res) => { res.clearCookie('sid'); res.json({ ok: true }); });
 
+  let balCache = { at: 0, v: null };
+  const walletSol = async () => {
+    if (!trader.kp) return null;
+    if (Date.now() - balCache.at < 20000) return balCache.v;
+    const v = await trader.balanceSol();
+    balCache = { at: Date.now(), v };
+    return v;
+  };
+
   app.get('/api/state', requireRead, async (req, res) => {
     const since = +req.query.since || 0, evSince = +req.query.ev || 0;
     const s = engine.summary();
-    const pub = (t) => ({ id: t.id, mint: t.mint, symbol: t.symbol, image: t.image, agent: t.agent, status: t.status, paper: t.paper, openedAt: t.openedAt, closedAt: t.closedAt, costSol: t.costSol, proceedsSol: t.proceedsSol, pnlSol: t.pnlSol, pnlPct: t.pnlPct, exitReason: t.exitReason, buySig: t.buySig, sellSig: t.sellSig, lastValue: t.lastValue });
+    const pub = (t) => ({ id: t.id, mint: t.mint, symbol: t.symbol, name: t.name || '', image: t.image, agent: t.agent, status: t.status, paper: t.paper, openedAt: t.openedAt, closedAt: t.closedAt, costSol: t.costSol, proceedsSol: t.proceedsSol, pnlSol: t.pnlSol, pnlPct: t.pnlPct, exitReason: t.exitReason, buySig: t.buySig, sellSig: t.sellSig, lastValue: t.lastValue, entryPrice: t.entryPrice, exitPrice: t.exitPrice, entryMcapSol: t.entryMcapSol, exitMcapSol: t.exitMcapSol, solUsdAtClose: t.solUsdAtClose, tokens: t.tokens });
     res.json({
       bot: { name: cfg.BOT_NAME, badge: cfg.BADGE },
       mode: engine.mode, running: engine.running, goalHold: engine.goalHold, authed: authed(req),
-      liveCapable: cfg.LIVE_CAPABLE, hasKey: !!trader.kp, dryRun: cfg.DRY_RUN, wallet: trader.pubkey, withdrawTo: cfg.WITHDRAW_ADDRESS || null,
+      liveCapable: cfg.LIVE_CAPABLE, hasKey: !!trader.kp, dryRun: cfg.DRY_RUN, wallet: trader.pubkey, walletSol: await walletSol(), withdrawTo: cfg.WITHDRAW_ADDRESS || null,
       solUsd: market.solUsd, summary: s, settings: engine.settings,
       agents: Object.fromEntries(Object.entries(AGENTS).map(([k, a]) => [k, { name: a.name, color: a.color, desc: a.desc, tp: a.tp, sl: a.sl, maxHoldMin: a.maxHoldMs / 60000 }])),
       limits: { maxSolPerTrade: cfg.MAX_SOL_PER_TRADE, maxOpen: cfg.MAX_OPEN_POSITIONS, dailyLossLimit: cfg.DAILY_LOSS_LIMIT_SOL, maxSlippage: cfg.MAX_SLIPPAGE_PCT, maxPriorityFee: cfg.MAX_PRIORITY_FEE_SOL, maxDevPct: cfg.MAX_DEV_PCT, maxBundlePct: cfg.MAX_BUNDLE_PCT, minLiqSol: cfg.MIN_LIQ_SOL },
@@ -73,6 +83,8 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   app.post('/api/settings', requireAdmin, act(async (req) => { await engine.saveSettings(req.body || {}); return engine.settings; }));
   app.post('/api/reset-paper', requireAdmin, act(() => engine.resetPaper()));
   app.post('/api/sell/:id', requireAdmin, act(async (req) => { const p = engine.open().find(x => x.id === req.params.id); if (!p) throw new Error('no such open position'); await engine.exit(p, 'manual sell'); }));
+
+  share.mount(app, { engine });
 
   app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
   app.listen(cfg.PORT, () => console.log(`${cfg.BOT_NAME} on :${cfg.PORT} · mode ${engine.mode} · db ${store.get().kind} · dryRun=${cfg.DRY_RUN} · key=${trader.kp ? 'loaded' : 'none'}`));

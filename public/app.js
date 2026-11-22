@@ -20,6 +20,9 @@ const bean = () => { const n = ++beanN; return BEANSRC.replace(/bg1/g, 'bg1_' + 
 $$('[data-bean]').forEach(e => e.innerHTML = bean());
 
 let S = null, logSeq = 0, evSeq = 0, firstLoad = true, shownProfit = 0, knownClosed = new Set();
+let range = 'all', customFrom = '', customTo = '', sharePayload = null, shareTheme = null;
+const SHARE_IC = '<svg viewBox="0 0 24 24"><path d="M4 12v8h16v-8"/><path d="M12 4v12"/><path d="M8 8l4-4 4 4"/></svg>';
+
 const fmtUsd = (v, sign = true) => { const a = Math.abs(v); const s = a >= 1000 ? a.toLocaleString(undefined, { maximumFractionDigits: 0 }) : a >= 100 ? a.toFixed(0) : a.toFixed(2); return (sign ? (v < 0 ? '-' : '+') : '') + '$' + s; };
 const fmtSol = (v, sign = true) => (sign ? (v < 0 ? '-' : '+') : '') + Math.abs(v).toFixed(4) + ' SOL';
 const usd = (sol) => sol * (S?.solUsd || 0);
@@ -65,15 +68,16 @@ function icon(t, color) {
 
 function card(t, newest) {
   const a = S.agents[t.agent] || { color: '#999' };
+  const share = `<button type="button" class="sh" data-share="${esc(t.id)}" title="Share PnL">${SHARE_IC}</button>`;
   if (t.status === 'open') {
     const cur = t.lastValue ?? t.costSol; const pct = (cur / t.costSol - 1) * 100; const pnl = cur - t.costSol;
     return `<div class="tc open" style="--c:${a.color}" title="${esc(a.name)} · open"><div class="h">${icon(t, a.color)}<span>${tick(t.symbol)}</span></div>
-      <div class="v"><span class="pct ${pct >= 0 ? 'up' : 'dn'}">${pct >= 0 ? '↑' : '↓'}${Math.abs(pct).toFixed(0)}%</span><span class="usd">${S.solUsd ? fmtUsd(usd(pnl)) : fmtSol(pnl)}</span></div><span class="x">open</span></div>`;
+      <div class="v"><span class="pct ${pct >= 0 ? 'up' : 'dn'}">${pct >= 0 ? '↑' : '↓'}${Math.abs(pct).toFixed(0)}%</span><span class="usd">${S.solUsd ? fmtUsd(usd(pnl)) : fmtSol(pnl)}</span></div><span class="x">open</span>${share}</div>`;
   }
   const pct = (t.pnlPct || 0) * 100; const win = t.pnlSol >= 0;
   return `<div class="tc ${win ? '' : 'loss'} ${newest ? 'newest' : ''}" data-id="${t.id}" style="--c:${a.color}" title="${esc(a.name)} · ${esc(t.exitReason || '')}">
     <div class="h">${icon(t, a.color)}<span>${tick(t.symbol)}</span></div>
-    <div class="v"><span class="pct ${win ? 'up' : 'dn'}">${win ? '↑' : '↓'}${Math.abs(pct).toFixed(0)}%</span><span class="usd ${win ? '' : 'dn'}">${S.solUsd ? fmtUsd(usd(t.pnlSol)) : fmtSol(t.pnlSol)}</span></div></div>`;
+    <div class="v"><span class="pct ${win ? 'up' : 'dn'}">${win ? '↑' : '↓'}${Math.abs(pct).toFixed(0)}%</span><span class="usd ${win ? '' : 'dn'}">${S.solUsd ? fmtUsd(usd(t.pnlSol)) : fmtSol(t.pnlSol)}</span></div>${share}</div>`;
 }
 
 const DOT = { scout: '#EF4444', sniper: '#3B82F6', curve: '#22C55E', graduate: '#A855F7', skip: '#D1D5DB', err: '#EF4444', win: '#22C55E', loss: '#EF4444', goal: '#F97316', withdraw: '#22C55E', info: '#9CA3AF' };
@@ -129,13 +133,21 @@ function render() {
   const mt = $('#modeTag'); mt.textContent = S.mode; mt.classList.toggle('live', S.mode === 'LIVE');
   const lb = $('#liveBtn'); lb.classList.toggle('off', !S.running); lb.querySelector('span').textContent = S.running ? (S.goalHold ? 'HOLD' : 'LIVE') : 'PAUSED';
 
-  rollTo(usd(s.pnl) || (S.solUsd ? 0 : s.pnl));
-  $('#profitSol').textContent = fmtSol(s.pnl) + (s.unreal ? ` · ${fmtSol(s.unreal)} open` : '');
-  $('#mult').textContent = s.mult.toFixed(2) + 'x';
-  $('#tradesLine').textContent = `${s.count} trades · ${Math.round(s.winRate * 100)}% win`;
-  const g = S.settings.goal; $('#goalLbl').textContent = `goal ${g}x${s.mult >= g ? ' ✓' : ''}`;
-  const prog = s.stack ? Math.max(0, Math.min(1, (s.mult - 1) / (g - 1))) : 0;
-  $('#goalBar').style.width = (prog * 100).toFixed(1) + '%'; $('#goalBar').classList.toggle('done', s.mult >= g);
+  const rs = rangeStats();
+  const isAll = range === 'all';
+  $('#lbl').textContent = isAll ? 'PROFIT' : rs.b.label + ' PNL';
+  rollTo(usd(rs.pnl) || (S.solUsd ? 0 : rs.pnl));
+  $('#profitSol').textContent = fmtSol(rs.pnl) + (rs.unreal ? ` · ${fmtSol(rs.unreal)} open` : '');
+  $('#mult').textContent = isAll ? s.mult.toFixed(2) + 'x' : ((rs.pnlPct < 0 ? '-' : '+') + Math.abs(rs.pnlPct * 100).toFixed(1) + '%');
+  $('#tradesLine').textContent = `${rs.count} trades · ${Math.round(rs.winRate * 100)}% win`;
+  const g = S.settings.goal; $('#goalLbl').textContent = isAll ? `goal ${g}x${s.mult >= g ? ' ✓' : ''}` : rs.b.label;
+  const prog = isAll ? (s.stack ? Math.max(0, Math.min(1, (s.mult - 1) / (g - 1))) : 0) : Math.max(0, Math.min(1, 0.5 + rs.pnlPct));
+  $('#goalBar').style.width = (prog * 100).toFixed(1) + '%'; $('#goalBar').classList.toggle('done', isAll && s.mult >= g);
+  paintSpark(rs.curve, (rs.pnl || 0) >= 0 ? '#22C55E' : '#EF4444');
+  const bw = $('#bestWorst');
+  bw.innerHTML = rs.count
+    ? `Best <b class="up">${tick(rs.best.symbol)} ${fmtSol(rs.best.pnlSol)}</b><br>Worst <b class="dn">${tick(rs.worst.symbol)} ${fmtSol(rs.worst.pnlSol)}</b>`
+    : '<span class="muted">No closed trades in this range yet.</span>';
 
   // agents
   const tot = Object.values(s.byAgent).reduce((a, v) => a + Math.abs(v), 0);
@@ -159,7 +171,7 @@ function render() {
   const all = [...S.open, ...S.closed];
   $('#tradeList').innerHTML = all.length ? all.map(t => { const a = S.agents[t.agent]; const pnl = t.status === 'open' ? (t.lastValue ?? t.costSol) - t.costSol : t.pnlSol;
     return `<div class="row2">${icon(t, a.color)}<div class="grow"><b>${tick(t.symbol)}</b> <span class="muted sm">${a.name} · ${t.status === 'open' ? 'open' : esc(t.exitReason || '')}${t.paper ? ' · paper' : ''}</span><div class="sm muted">${new Date(t.openedAt).toLocaleString()} · cost ${t.costSol.toFixed(4)} SOL ${t.buySig ? `<a href="${solscan(t.buySig)}" target="_blank">buy tx</a>` : ''}${t.sellSig ? `<a href="${solscan(t.sellSig)}" target="_blank">sell tx</a>` : ''}<a href="https://pump.fun/coin/${esc(t.mint)}" target="_blank">pump.fun</a></div></div>
-    <div style="text-align:right"><b class="${pnl >= 0 ? 'up' : 'dn'}">${fmtSol(pnl)}</b><div class="sm muted">${S.solUsd ? fmtUsd(usd(pnl)) : ''}</div>${t.status === 'open' && S.authed ? `<button class="pill sm" data-sell="${t.id}" style="padding:4px 10px;margin-top:4px">Sell</button>` : ''}</div></div>`; }).join('') : '<div class="card muted">No trades yet.</div>';
+    <div style="text-align:right"><b class="${pnl >= 0 ? 'up' : 'dn'}">${fmtSol(pnl)}</b><div class="sm muted">${S.solUsd ? fmtUsd(usd(pnl)) : ''}</div><div class="btns" style="justify-content:flex-end">${t.status === 'open' && S.authed ? `<button class="pill sm" data-sell="${t.id}" style="padding:4px 10px;margin-top:4px">Sell</button>` : ''}<button class="pill sm" data-share="${t.id}" style="padding:4px 10px;margin-top:4px">Share</button></div></div></div>`; }).join('') : '<div class="card muted">No trades yet.</div>';
   $$('[data-sell]').forEach(b => b.onclick = async () => { if (!confirm('Sell this position now?')) return; try { await api('/api/sell/' + b.dataset.sell, {}); } catch (e) { alert(e.message); } });
 
   // me tab
@@ -167,7 +179,8 @@ function render() {
   $('#statusCard').innerHTML = `<div class="card-h">Status</div>` +
     kv('Mode', S.mode === 'LIVE' ? '<b class="up">LIVE (real SOL)</b>' : '<b>PAPER</b> (live data, simulated fills)') +
     kv('Bot', S.running ? (S.goalHold ? 'holding at goal' : 'running') : 'paused') +
-    kv('Wallet', S.wallet ? esc(S.wallet) : 'no key set') +
+    kv('Wallet', S.wallet ? `<span style="word-break:break-all">${esc(S.wallet)}</span>` : 'no key set') +
+    kv('Wallet balance', S.wallet ? (S.walletSol == null ? 'unavailable' : Number(S.walletSol).toFixed(4) + ' SOL') : '—') +
     kv('Withdraw to', S.withdrawTo ? esc(S.withdrawTo) : 'WITHDRAW_ADDRESS not set') +
     kv('Stack', s.stack ? fmtSol(s.stack, false) : 'set on start') +
     kv('Today realized', fmtSol(s.today) + (S.dailyLossHit ? ' · <b class="dn">limit hit</b>' : '')) +
@@ -231,4 +244,220 @@ $('#dlgOk').onclick = async () => {
   catch (e) { $('#dlgErr').textContent = e.message; }
 };
 
+initTheme();
+initShare();
 poll();
+
+// ---- theme
+function currentTheme() { return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'; }
+function setTheme(t) {
+  const theme = t === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+  try { localStorage.setItem('devameer-theme', theme); } catch { /* ignore */ }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'light' ? '#F9FAFB' : '#09090B');
+}
+function initTheme() {
+  setTheme(currentTheme());
+  $$('[data-theme-toggle]').forEach((b) => { b.onclick = () => setTheme(currentTheme() === 'dark' ? 'light' : 'dark'); });
+}
+
+// ---- account timeframe
+function rangeBounds() {
+  const now = Date.now();
+  if (range === '24h') return { from: now - 864e5, to: now, label: '24H' };
+  if (range === '7d') return { from: now - 7 * 864e5, to: now, label: '7D' };
+  if (range === '30d') return { from: now - 30 * 864e5, to: now, label: '30D' };
+  if (range === 'custom' && customFrom && customTo) {
+    const from = new Date(customFrom + 'T00:00:00').getTime();
+    const to = new Date(customTo + 'T23:59:59.999').getTime();
+    if (Number.isFinite(from) && Number.isFinite(to) && to >= from) return { from, to, label: 'CUSTOM' };
+  }
+  return { from: 0, to: now, label: 'ALL TIME' };
+}
+function rangeStats() {
+  const b = rangeBounds();
+  const closed = (S.closed || []).filter((t) => t.closedAt >= b.from && t.closedAt <= b.to);
+  const includeOpen = b.to >= Date.now() - 2000;
+  const open = includeOpen ? (S.open || []) : [];
+  let realized = 0; for (const t of closed) realized += t.pnlSol || 0;
+  let unreal = 0; for (const p of open) unreal += (p.lastValue ?? p.costSol) - p.costSol;
+  const pnl = realized + unreal;
+  const wins = closed.filter((t) => t.pnlSol > 0).length;
+  const ranked = closed.slice().sort((a, c) => (c.pnlSol || 0) - (a.pnlSol || 0));
+  let startPnl = 0;
+  for (const t of S.closed || []) if (t.closedAt < b.from) startPnl += t.pnlSol || 0;
+  const startEq = (S.summary?.stack || 0) + startPnl;
+  const pnlPct = startEq ? pnl / startEq : 0;
+  const chrono = closed.slice().sort((a, c) => a.closedAt - c.closedAt);
+  const curve = [{ t: chrono[0] ? chrono[0].closedAt - 60000 : b.from, pnl: 0 }];
+  let run = 0;
+  for (const t of chrono) { run += t.pnlSol || 0; curve.push({ t: t.closedAt, pnl: run }); }
+  if (includeOpen && unreal) curve.push({ t: Date.now(), pnl: run + unreal });
+  if (curve.length === 1) curve.push({ t: b.to, pnl: 0 });
+  return { b, closed, open, pnl, unreal, wins, count: closed.length, winRate: closed.length ? wins / closed.length : 0, best: ranked[0] || null, worst: ranked.length ? ranked[ranked.length - 1] : null, curve, pnlPct };
+}
+function paintSpark(points, color) {
+  const svg = $('#spark'); if (!svg) return;
+  if (!points || points.length < 2) { svg.innerHTML = ''; return; }
+  const w = 120, h = 44, pad = 2;
+  const ys = points.map((p) => p.pnl);
+  const min = Math.min(0, ...ys), max = Math.max(0, ...ys), span = max - min || 1;
+  const n = Math.max(points.length - 1, 1);
+  const coords = points.map((p, i) => {
+    const x = pad + (i / n) * (w - pad * 2);
+    const y = pad + (h - pad * 2) - ((p.pnl - min) / span) * (h - pad * 2);
+    return [x, y];
+  });
+  const d = coords.map((c, i) => (i ? 'L' : 'M') + c[0].toFixed(1) + ',' + c[1].toFixed(1)).join(' ');
+  const last = coords[coords.length - 1];
+  const zy = pad + (h - pad * 2) - ((0 - min) / span) * (h - pad * 2);
+  svg.innerHTML = `<line x1="0" x2="${w}" y1="${zy.toFixed(1)}" y2="${zy.toFixed(1)}" stroke="currentColor" opacity=".2" stroke-dasharray="2 2"/>
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="2.4" fill="${color}"/>`;
+}
+
+$$('#rangeChips [data-range]').forEach((b) => b.onclick = () => {
+  range = b.dataset.range;
+  $$('#rangeChips [data-range]').forEach((x) => x.classList.toggle('on', x === b));
+  if (range === 'custom' && (!customFrom || !customTo)) {
+    const to = new Date(), from = new Date(Date.now() - 7 * 864e5);
+    customFrom = from.toISOString().slice(0, 10);
+    customTo = to.toISOString().slice(0, 10);
+    $('#rangeFrom').value = customFrom; $('#rangeTo').value = customTo;
+  }
+  $('#customRange').classList.toggle('hidden', range !== 'custom');
+  if (S) render();
+});
+$('#rangeApply').onclick = () => {
+  customFrom = $('#rangeFrom').value; customTo = $('#rangeTo').value;
+  if (!customFrom || !customTo) return;
+  range = 'custom';
+  $$('#rangeChips [data-range]').forEach((x) => x.classList.toggle('on', x.dataset.range === 'custom'));
+  $('#customRange').classList.remove('hidden');
+  if (S) render();
+};
+
+// ---- share cards
+function shareMsg(t) { $('#shareMsg').textContent = t || ''; }
+function findTrade(id) { return [...(S.open || []), ...(S.closed || [])].find((t) => t.id === id); }
+function tradeShareData(t) {
+  const open = t.status === 'open';
+  const proceeds = open ? (t.lastValue != null ? t.lastValue : t.costSol) : t.proceedsSol;
+  const pnlSol = open ? proceeds - t.costSol : t.pnlSol;
+  const pnlPct = t.costSol ? pnlSol / t.costSol : 0;
+  const a = S.agents[t.agent] || {};
+  const solUsd = t.solUsdAtClose || S.solUsd || 0;
+  return {
+    kind: 'trade', id: t.id, symbol: t.symbol, name: t.name || '', image: t.image || null,
+    agent: t.agent, agentName: a.name || t.agent, agentColor: a.color || '#71717A',
+    status: t.status, paper: t.paper !== false && (t.paper || S.mode !== 'LIVE'),
+    openedAt: t.openedAt, closedAt: t.closedAt || null, holdMs: (t.closedAt || Date.now()) - t.openedAt,
+    costSol: t.costSol, proceedsSol: proceeds, pnlSol, pnlPct, pnlUsd: pnlSol * solUsd,
+    entryPrice: t.entryPrice, exitPrice: t.exitPrice, entryMcapSol: t.entryMcapSol, exitMcapSol: t.exitMcapSol,
+    solUsd, exitReason: t.exitReason || (open ? 'open position' : ''),
+    botName: S.bot?.name || 'Devameer Bot', badge: S.bot?.badge || 'DEVAMEER TERMINAL',
+  };
+}
+function accountShareData() {
+  const rs = rangeStats();
+  return {
+    kind: 'account', range, label: rs.b.label, from: rs.b.from, to: rs.b.to,
+    pnlSol: rs.pnl, pnlUsd: usd(rs.pnl), pnlPct: rs.pnlPct, unrealSol: rs.unreal,
+    trades: rs.count, wins: rs.wins, winRate: rs.winRate,
+    best: rs.best && { symbol: rs.best.symbol, name: rs.best.name || '', pnlSol: rs.best.pnlSol, pnlPct: rs.best.pnlPct },
+    worst: rs.worst && { symbol: rs.worst.symbol, name: rs.worst.name || '', pnlSol: rs.worst.pnlSol, pnlPct: rs.worst.pnlPct },
+    curve: rs.curve, solUsd: S.solUsd || 0, paper: S.mode !== 'LIVE',
+    botName: S.bot?.name || 'Devameer Bot', badge: S.bot?.badge || 'DEVAMEER TERMINAL',
+  };
+}
+function shareLink(d) {
+  if (d.kind === 'account') {
+    const qs = new URLSearchParams({ range: d.range === 'custom' ? 'custom' : (d.range || 'all') });
+    if (d.range === 'custom') { qs.set('from', new Date(d.from).toISOString()); qs.set('to', new Date(d.to).toISOString()); }
+    if (shareTheme === 'light') qs.set('theme', 'light');
+    return location.origin + '/share/account?' + qs;
+  }
+  return location.origin + '/share/trade/' + d.id + (shareTheme === 'light' ? '?theme=light' : '');
+}
+async function inlineImage(d) {
+  if (!d.image) return d;
+  try {
+    const r = await fetch('/share/img?u=' + encodeURIComponent(d.image));
+    if (!r.ok) return d;
+    const blob = await r.blob();
+    const imageData = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+    return { ...d, imageData, image: undefined };
+  } catch { return d; }
+}
+async function paintShare() {
+  if (!sharePayload) return;
+  const d = await inlineImage(sharePayload);
+  const svg = d.kind === 'account' ? ShareCard.accountSvg(d, shareTheme) : ShareCard.tradeSvg(d, shareTheme);
+  $('#shareCardWrap').innerHTML = svg;
+  $('#shareTheme').textContent = shareTheme === 'light' ? 'Dark card' : 'Light card';
+  $('#shareTitle').textContent = d.kind === 'account' ? (d.label || 'Account') + ' PnL' : tick(d.symbol) + ' PnL';
+}
+async function openShare(d) {
+  sharePayload = d;
+  shareTheme = shareTheme || currentTheme();
+  shareMsg('');
+  $('#shareDlg').classList.remove('hidden');
+  await paintShare();
+}
+async function sharePngBlob() {
+  const svg = $('#shareCardWrap').innerHTML.trim();
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  const img = new Image(); img.src = url; await img.decode();
+  const c = document.createElement('canvas'); c.width = ShareCard.W; c.height = ShareCard.H;
+  c.getContext('2d').drawImage(img, 0, 0);
+  return new Promise((res) => c.toBlob(res, 'image/png'));
+}
+function initShare() {
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-share]');
+    if (!b || !S) return;
+    const t = findTrade(b.dataset.share);
+    if (!t) return;
+    openShare(tradeShareData(t));
+  });
+  $('#shareAcctBtn').onclick = () => { if (!S) return; openShare(accountShareData()); };
+  $('#shareClose').onclick = () => $('#shareDlg').classList.add('hidden');
+  $('#shareDlg').addEventListener('click', (e) => { if (e.target === $('#shareDlg')) $('#shareDlg').classList.add('hidden'); });
+  $('#shareTheme').onclick = async () => { shareTheme = shareTheme === 'light' ? 'dark' : 'light'; await paintShare(); };
+  $('#shareDl').onclick = async () => {
+    try {
+      const b = await sharePngBlob();
+      const name = (sharePayload?.kind === 'account' ? 'devameer-account-pnl' : 'devameer-' + (sharePayload?.symbol || 'trade') + '-pnl') + '.png';
+      if (navigator.share && navigator.canShare) {
+        const file = new File([b], name, { type: 'image/png' });
+        if (navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+      }
+      const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    } catch (e) { shareMsg(e.message); }
+  };
+  $('#shareCopy').onclick = async () => {
+    try {
+      const b = await sharePngBlob();
+      if (navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]);
+        shareMsg('Copied image');
+      } else {
+        const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'devameer-pnl.png'; a.click();
+        shareMsg('Saved PNG (clipboard not available on this browser)');
+      }
+    } catch (e) { shareMsg(e.message); }
+  };
+  $('#shareX').onclick = () => {
+    if (!sharePayload) return;
+    const url = shareLink(sharePayload);
+    const text = ShareCard.tweetText(sharePayload, url);
+    window.open('https://x.com/intent/post?text=' + encodeURIComponent(text), '_blank', 'noopener');
+  };
+  $('#shareLink').onclick = async () => {
+    if (!sharePayload) return;
+    const url = shareLink(sharePayload);
+    try { await navigator.clipboard.writeText(url); shareMsg('Copied link'); } catch { shareMsg(url); }
+  };
+}

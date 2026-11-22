@@ -87,7 +87,7 @@ class Engine {
   summary() {
     const closed = this.closed(), open = this.open();
     const realized = closed.reduce((s, t) => s + t.pnlSol, 0);
-    let unreal = 0; for (const p of open) { const v = this.posValue(p); if (v !== null) unreal += v - p.costSol; }
+    let unreal = 0; for (const p of open) { const v = this.posValue(p); const cur = v != null ? v : p.lastValue; if (cur != null) unreal += cur - p.costSol; }
     const wins = closed.filter(t => t.pnlSol > 0).length;
     const stack = this.stack || (this.trader.live ? null : cfg.PAPER_STACK_SOL);
     const withdrawn = this.withdrawals.filter(w => !!w.paper === !this.trader.live).reduce((s, w) => s + w.sol, 0);
@@ -255,9 +255,9 @@ class Engine {
       const r = await this.trader.buy(t, size, this.settings);
       await this.market.imageFor(t);
       const p = {
-        id: crypto.randomUUID(), mint: t.mint, symbol: t.symbol, image: t.image || null, curveKey: t.curveKey, creator: t.creator,
+        id: crypto.randomUUID(), mint: t.mint, symbol: t.symbol, name: t.name || '', image: t.image || null, curveKey: t.curveKey, creator: t.creator,
         agent, status: 'open', paper: r.paper, openedAt: Date.now(), sizeSol: size, costSol: r.costSol, tokens: r.tokens,
-        entryPrice: r.costSol / r.tokens, curvePriceAtEntry: priceAtEntry, buySig: r.sig, peakValue: r.costSol,
+        entryPrice: r.costSol / r.tokens, curvePriceAtEntry: priceAtEntry, entryMcapSol: (priceAtEntry || 0) * 1e9, buySig: r.sig, peakValue: r.costSol,
       };
       this.trades.push(p); this.market.pinned.add(t.mint); this.market.subscribeTrades([t.mint]);
       await store.get().saveTrade(p);
@@ -284,6 +284,7 @@ class Engine {
     try {
       const r = await this.trader.sell(t, p, this.settings);
       p.status = 'closed'; p.closedAt = Date.now(); p.proceedsSol = r.proceedsSol; p.sellSig = r.sig; p.exitReason = reason;
+      p.exitPrice = t.price || (p.tokens ? r.proceedsSol / p.tokens : null); p.exitMcapSol = (t.mcapSol != null ? t.mcapSol : (p.exitPrice || 0) * 1e9);
       p.pnlSol = r.proceedsSol - p.costSol; p.pnlPct = p.pnlSol / p.costSol; p.solUsdAtClose = this.market.solUsd;
       this.market.pinned.delete(p.mint);
       await store.get().saveTrade(p);

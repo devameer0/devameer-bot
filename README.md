@@ -40,3 +40,17 @@ It starts **PAUSED** and in **PAPER** mode (`DRY_RUN=true`). Paper mode uses liv
 npm install
 ADMIN_PASSWORD=... npm start
 ```
+
+## Theme
+The dashboard defaults to **dark mode**. A sun/moon button in the header (and on the login screen) switches to light mode. The choice is stored in `localStorage` as `devameer-theme`.
+
+## Share cards
+Every open or closed trade has a **Share** button, and the home screen has an account **Share** button next to the 24H / 7D / 30D / All / Custom timeframe chips. Each card can be downloaded as a PNG, copied to the clipboard, or opened as a prefilled **Post on X** compose window (`x.com/intent/post` — nothing is posted automatically).
+
+Public, read-only links (no wallet, key, admin, or withdraw data):
+- `/share/trade/:id` and `/share/trade/:id.png` — one coin's PnL
+- `/share/account?range=24h|7d|30d|all` (or `range=custom&from=&to=`) and `/share/account.png` — account PnL for that window
+
+Add `?theme=light` for the light card. Open Graph / Twitter `og:image` points at the PNG so a pasted link can show the card preview. The badge on the card is **PAPER** whenever the trade (or the account, in paper mode) is simulated; it only says **LIVE** for real fills.
+
+On Render's free plan there is no persistent disk, so history resets when the service restarts unless `DATABASE_URL` is set.
