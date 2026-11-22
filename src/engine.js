@@ -109,6 +109,7 @@ class Engine {
       await store.get().set(this.modeKey('stack'), this.stack);
     }
     this.running = true;
+    try { await store.get().set(this.modeKey('running'), true); } catch {}
     this.log(`up, scanning pump.fun + X`, 'info');
     flow.emit({ node: 'risk', type: 'status', ok: true, message: 'scanning started' });
     const usd = this.stack * (this.market.solUsd || 0);
@@ -117,9 +118,17 @@ class Engine {
 
   async stop(sellAll) {
     this.running = false;
+    try { await store.get().set(this.modeKey('running'), false); } catch {}
     this.log(sellAll ? 'stopping. selling all open positions' : 'paused. open positions still managed by exits', 'info');
     flow.emit({ node: 'risk', type: 'status', message: sellAll ? 'stopped — selling open positions' : 'paused — exits still active' });
     if (sellAll) for (const p of this.open()) await this.exit(p, 'manual stop');
+  }
+
+  async resumeIfNeeded() {
+    try {
+      const want = await store.get().get(this.modeKey('running'));
+      if (want && !this.running) await this.start();
+    } catch (e) { this.log('resume skipped: ' + e.message, 'err'); }
   }
 
   async keepGoing() {
@@ -136,6 +145,7 @@ class Engine {
     await db.set('paper:stack', null); await db.set('paper:goalDone', false); await db.set('paperResetAt', Date.now());
     this.withdrawals = this.withdrawals.filter(w => !w.paper); await db.set('withdrawals', this.withdrawals);
     this.stack = null; this.goalDone = false; this.goalHold = false; this.running = false;
+    try { await store.get().set(this.modeKey('running'), false); } catch {}
     this.log('paper stats reset', 'info');
   }
 

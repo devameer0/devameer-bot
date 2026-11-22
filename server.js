@@ -27,6 +27,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   await ticks.init(market, engine);
   await flow.attach({ market, engine, trader, ticks });
   market.start();
+  await engine.resumeIfNeeded();
 
   const app = express();
   app.disable('x-powered-by');
@@ -36,6 +37,31 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   const authed = (req) => verify(req.cookies.sid);
   const requireAdmin = (req, res, next) => authed(req) ? next() : res.status(401).json({ error: 'login required' });
   const requireRead = (req, res, next) => (cfg.PUBLIC_READONLY || authed(req)) ? next() : res.status(401).json({ error: 'login required' });
+
+  const corsOrigins = String(cfg.FLOW_CORS_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && corsOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Flow-Token');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    }
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    next();
+  });
+
+  const flowTokenOk = (req) => {
+    const want = cfg.FLOW_READ_TOKEN;
+    if (!want) return false;
+    const hdr = String(req.headers.authorization || '');
+    const bearer = hdr.startsWith('Bearer ') ? hdr.slice(7) : '';
+    const got = bearer || String(req.headers['x-flow-token'] || '');
+    if (!got || got.length !== want.length) return false;
+    return safeEq(got, want);
+  };
+  const requireFlowRead = (req, res, next) => (authed(req) || flowTokenOk(req)) ? next() : res.status(401).json({ error: 'login required' });
 
   app.get('/healthz', (req, res) => res.json({ ok: true }));
 
@@ -62,7 +88,20 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
     return v;
   };
 
-  app.get('/api/state', requireRead, async (req, res) => {
+  app.get('/api/state', (req, res, next) => {
+    if (flowTokenOk(req) && !authed(req)) {
+      const s = engine.summary();
+      return res.json({
+        bot: { name: cfg.BOT_NAME, badge: cfg.BADGE },
+        mode: engine.mode, running: engine.running, goalHold: engine.goalHold, authed: false, flowRead: true,
+        dryRun: cfg.DRY_RUN, solUsd: market.solUsd,
+        summary: { pnl: s.pnl, realized: s.realized, unreal: s.unreal, open: s.open, count: s.count, winRate: s.winRate, mult: s.mult },
+        feed: { wsConnected: !!market.stats.wsConnected, watching: market.watchList().length, tracked: market.tokens.size, newTokens: market.stats.newTokens },
+        db: store.get().kind, dbSchema: store.get().schema || null,
+      });
+    }
+    return requireRead(req, res, next);
+  }, async (req, res) => {
     const since = +req.query.since || 0, evSince = +req.query.ev || 0;
     const s = engine.summary();
     const pub = (t) => ({ id: t.id, mint: t.mint, symbol: t.symbol, name: t.name || '', image: t.image, agent: t.agent, status: t.status, paper: t.paper, openedAt: t.openedAt, closedAt: t.closedAt, costSol: t.costSol, proceedsSol: t.proceedsSol, pnlSol: t.pnlSol, pnlPct: t.pnlPct, exitReason: t.exitReason, buySig: t.buySig, sellSig: t.sellSig, lastValue: t.lastValue, entryPrice: t.entryPrice, exitPrice: t.exitPrice, entryMcapSol: t.entryMcapSol, exitMcapSol: t.exitMcapSol, solUsdAtClose: t.solUsdAtClose, tokens: t.tokens });
@@ -104,7 +143,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
   // Register replay MP4 routes before /share/trade/:id so :id.mp4 is not swallowed.
   replay.mount(app, { engine, ticks, share, requireAdmin, requireRead });
   share.mount(app, { engine, ticks });
-  flow.mount(app, { requireAdmin });
+  flow.mount(app, { requireAdmin, requireFlowRead });
 
   app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
   app.listen(cfg.PORT, () => console.log(`${cfg.BOT_NAME} on :${cfg.PORT} · mode ${engine.mode} · db ${store.get().kind} · dryRun=${cfg.DRY_RUN} · key=${trader.kp ? 'loaded' : 'none'}`));

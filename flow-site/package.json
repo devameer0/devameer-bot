@@ -1,0 +1,17 @@
+{
+  "name": "devameer-flow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone Devameer Bot Pipeline (read-only live view)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

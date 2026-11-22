@@ -291,8 +291,9 @@ async function attach({ market, engine, trader, ticks }) {
   emit({ node: 'feed', type: 'status', message: 'pipeline inspector online', ok: true, data: { dryRun: !!cfg.DRY_RUN } });
 }
 
-function mount(app, { requireAdmin }) {
-  app.get('/api/flow', requireAdmin, (req, res) => {
+function mount(app, { requireAdmin, requireFlowRead }) {
+  const gate = requireFlowRead || requireAdmin;
+  app.get('/api/flow', gate, (req, res) => {
     res.json({
       nodes: NODES,
       edges: EDGES,
@@ -302,7 +303,7 @@ function mount(app, { requireAdmin }) {
       configs: Object.fromEntries(NODES.map((n) => [n.id, nodeConfig(n.id)])),
     });
   });
-  app.get('/api/flow/events', requireAdmin, (req, res) => {
+  app.get('/api/flow/events', gate, (req, res) => {
     const events = history({
       since: req.query.since, node: req.query.node, symbol: req.query.symbol || req.query.coin,
       type: req.query.type, agent: req.query.agent, errors: req.query.errors === '1' || req.query.errors === 'true',
@@ -310,7 +311,7 @@ function mount(app, { requireAdmin }) {
     });
     res.json({ events, stats, seq, status: status() });
   });
-  app.get('/api/flow/stream', requireAdmin, (req, res) => {
+  app.get('/api/flow/stream', gate, (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');

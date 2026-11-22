@@ -19,6 +19,8 @@ const cfg = {
   DATA_DIR: process.env.DATA_DIR || './data',
   KEEP_AWAKE: bool('KEEP_AWAKE', false),
   PUBLIC_URL: process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || '',
+  FLOW_READ_TOKEN: process.env.FLOW_READ_TOKEN || '',
+  FLOW_CORS_ORIGIN: process.env.FLOW_CORS_ORIGIN || '',
 
   // ---- hard safety caps ----
   MAX_SOL_PER_TRADE: num('MAX_SOL_PER_TRADE', 0.05),

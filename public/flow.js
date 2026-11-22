@@ -605,6 +605,8 @@
     if (bindChrome._done) return;
     bindChrome._done = true;
     $('#flowBack')?.addEventListener('click', () => {
+      const opts = window.DEVAMEER_FLOW_OPTS || {};
+      if (opts.standalone && opts.dashboardUrl) { location.href = opts.dashboardUrl; return; }
       const home = document.querySelector('.nav [data-go="home"]');
       home && home.click();
     });
@@ -666,6 +668,7 @@
     ['#flowSearchBtn','#flowSearchBtn2'].forEach((id) => $(id)?.addEventListener('click', () => { $('#flowQ')?.focus(); $('#flowLog')?.classList.add('open', 'expanded'); }));
     $('#flowTermBtn')?.addEventListener('click', () => { $('#flowLog')?.classList.toggle('open'); });
     $('#flowRun')?.addEventListener('click', async () => {
+      if ((window.DEVAMEER_FLOW_OPTS || {}).standalone) return; // read-only on the standalone site
       try {
         await fetch(state.status.running ? '/api/stop' : '/api/start', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' });
       } catch {}
