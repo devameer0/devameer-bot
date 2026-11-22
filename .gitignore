@@ -2,3 +2,6 @@ node_modules
 data
 .env
 *.db
+preview.log
+tunnel.log
+*.pid
