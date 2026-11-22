@@ -71,12 +71,8 @@ On Render's free plan the local SQLite file is wiped on every restart. Set `DATA
 
 
 ## Flow (live pipeline)
-Admins get a **Flow** tab that draws the real bot pipeline in an n8n-style canvas (dark/light). Nodes follow the code path: PumpPortal feed, Jupiter price, Solana RPC / curve reads, rug filters (pass/reject), the four agents, risk checks, buy, position monitor, exits, sell, database, share/replay, withdraw, and errors/alerts.
-
-Every meaningful activity is emitted on an internal event bus (no secrets — keys, passwords, and connection strings are stripped), streamed to the browser over SSE (`/api/flow/stream`), and kept in a ring buffer plus a capped `flow_events` table (last 5,000). The canvas pulses nodes and sends a particle along the edge; a terminal-style activity log under the graph can be filtered, paused, searched, and exported as CSV/JSON. Click a node for its current read-only config and the latest events as JSON.
-
-
+The bot emits every meaningful activity on an internal event bus (no secrets — keys, passwords, and connection strings are stripped), streamed over SSE (`/api/flow/stream`) and kept in a ring buffer plus a capped `flow_events` table (last 5,000). Those APIs are used by the standalone Pipeline site. The main trading terminal does not include a Flow tab.
 ## Standalone Flow site
-The live pipeline also has its own website (Render service `devameer-flow`, typically https://devameer-flow.onrender.com), branded **Devameer Bot Pipeline**. It is a small Node proxy in `/flow-site` with its own login screen (same admin password as the terminal). After login it streams the graph, SSE events, and a stripped `/api/state` from the bot using a server-side `FLOW_READ_TOKEN`. The token never reaches the browser and cannot start, stop, trade, withdraw, or change settings. CORS on the bot is locked to the flow site origin. The in-dashboard Flow tab is unchanged.
+The live pipeline has its own website (Render service `devameer-flow`, typically https://devameer-flow.onrender.com), branded **Devameer Bot Pipeline**. It is a small Node proxy in `/flow-site` with a dark login screen (same admin password as the terminal) and a full-screen, dark-only workflow canvas. Motion (particles, node auras, token chips, a gentle camera) is driven by real SSE events. The token never reaches the browser and cannot start, stop, trade, withdraw, or change settings. CORS on the bot is locked to the flow site origin.
 
 On Render's free plan both sites may sleep when idle. The flow site can set `KEEP_AWAKE=true` (and `PUBLIC_URL`) to ping itself every 10 minutes, which helps but does not guarantee 24/7 uptime.

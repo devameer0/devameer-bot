@@ -144,9 +144,6 @@ app.get('/api/flow/stream', requireSession, (req, res) => {
 });
 
 const pub = path.join(__dirname, 'public');
-const shared = path.join(__dirname, '..', 'public');
-app.get('/flow.js', (req, res) => res.sendFile(path.join(shared, 'flow.js')));
-app.get('/flow.css', (req, res) => res.sendFile(path.join(shared, 'flow.css')));
 app.use(express.static(pub, { extensions: ['html'] }));
 
 app.listen(PORT, () => console.log(`Devameer Bot Pipeline on :${PORT} · bot ${BOT_URL}`));
