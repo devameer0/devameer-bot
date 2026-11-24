@@ -2,10 +2,33 @@
 (() => {
   const NODE = 52;
   const R = 13;
+  const CARD_W = 248;
+  const CARD_H = 196;
+  const SCREEN_CAP = 7;
   const PARTICLE_CAP_DESK = 320;
   const PARTICLE_CAP_MOB = 160;
   const CHIP_CAP = 48;
   const IDLE_RESUME_MS = 10000;
+
+  const AGENTS = {
+    feed:     { name: 'Herald',    role: 'Token feed' },
+    jupiter:  { name: 'Quote',     role: 'SOL price' },
+    rpc:      { name: 'Chain',     role: 'On-chain' },
+    rugs:     { name: 'Sentinel',  role: 'Rug filter' },
+    sniper:   { name: 'Sniper',    role: 'Fresh launches' },
+    scout:    { name: 'Scout',     role: 'Live hype' },
+    curve:    { name: 'Rider',     role: 'Bonding curve' },
+    graduate: { name: 'Graduate',  role: 'Near-grad' },
+    risk:     { name: 'Oracle',    role: 'Risk limits' },
+    buy:      { name: 'Broker',    role: 'Buyer' },
+    monitor:  { name: 'Watch',     role: 'Positions' },
+    exits:    { name: 'Keeper',    role: 'Exits' },
+    sell:     { name: 'Closer',    role: 'Sells' },
+    db:       { name: 'Archivist', role: 'Ledger' },
+    share:    { name: 'Editor',    role: 'Replays' },
+    withdraw: { name: 'Vault',     role: 'Withdraw' },
+    errors:   { name: 'Alarm',     role: 'Alerts' },
+  };
 
   const state = {
     nodes: [],
@@ -22,6 +45,7 @@
     shown: {},
     pnl: {},
     lastEv: {},
+    screens: {},
     focus: { x: 0, y: 0, w: 1, at: 0 },
     activity: [],
     hover: null,
@@ -53,16 +77,33 @@
   const nodeById = (id) => state.nodes.find((n) => n.id === id);
 
   function relabel(n) {
-    if (n.id === 'exits') { n.kind = 'Exits'; n.name = 'PnL'; n.sub = 'Take profit / SL'; }
+    const a = AGENTS[n.id];
+    if (a) {
+      n.name = a.name;
+      n.role = a.role;
+      n.sub = a.role;
+      n.kind = 'Agent';
+    }
     return n;
+  }
+
+  function agentTitle(n) {
+    const role = n.role || n.sub || '';
+    return role ? (n.name + ' · ' + role) : (n.name || n.id);
+  }
+
+  function cardBox(n) {
+    return { x: n.x - CARD_W / 2, y: n.y - CARD_H / 2, w: CARD_W, h: CARD_H };
   }
 
   function edgePath(e) {
     const a = nodeById(e.from), b = nodeById(e.to);
     if (!a || !b) return null;
-    const x1 = a.x + NODE / 2, y1 = a.y;
-    const x2 = b.x - NODE / 2, y2 = b.y;
-    const dx = Math.max(48, Math.abs(x2 - x1) * 0.45);
+    const y1 = a.y - CARD_H / 2 + 36;
+    const y2 = b.y - CARD_H / 2 + 36;
+    const x1 = a.x + CARD_W / 2;
+    const x2 = b.x - CARD_W / 2;
+    const dx = Math.max(56, Math.abs(x2 - x1) * 0.45);
     return { x1, y1, x2, y2, c1x: x1 + dx, c1y: y1, c2x: x2 - dx, c2y: y2, a, b, e };
   }
   function bez(p, t) {
@@ -151,6 +192,341 @@
     ctx.restore();
   }
 
+
+  function mixHex(hex, t, into) {
+    const p = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+    const a = p(hex), b = p(into || '#000000');
+    const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
+    return 'rgb(' + c.join(',') + ')';
+  }
+
+  function drawAvatar(ctx, n, r) {
+    const id = n.id, color = n.color || '#3B82F6';
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, 7);
+    ctx.fillStyle = mixHex(color, 0.45, '#0B0B0D');
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, 7);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.arc(-r * 0.28, -r * 0.32, r * 0.55, 0, 7);
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fill();
+
+    const cream = '#F4F1EA';
+    const ink = '#141416';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Head
+    ctx.fillStyle = cream;
+    ctx.beginPath();
+    if (id === 'rpc') {
+      ctx.moveTo(0, -r * 0.62); ctx.lineTo(r * 0.5, -r * 0.18); ctx.lineTo(r * 0.32, r * 0.55);
+      ctx.lineTo(-r * 0.32, r * 0.55); ctx.lineTo(-r * 0.5, -r * 0.18); ctx.closePath();
+    } else if (id === 'db' || id === 'share') {
+      ctx.roundRect(-r * 0.46, -r * 0.5, r * 0.92, r * 1.02, r * 0.22);
+    } else if (id === 'risk' || id === 'errors') {
+      ctx.moveTo(0, -r * 0.68); ctx.lineTo(r * 0.58, r * 0.48); ctx.lineTo(-r * 0.58, r * 0.48); ctx.closePath();
+    } else {
+      ctx.ellipse(0, -r * 0.02, r * 0.52, r * 0.6, 0, 0, 7);
+    }
+    ctx.fill();
+
+    // Unique accessories
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1.6;
+    if (id === 'feed') {
+      ctx.beginPath(); ctx.arc(0, -r * 0.72, 1.6, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, -r * 0.62); ctx.lineTo(0, -r * 0.78); ctx.stroke();
+    } else if (id === 'jupiter') {
+      ctx.beginPath(); ctx.ellipse(0, 0, r * 0.7, r * 0.2, -0.4, 0, 7); ctx.stroke();
+    } else if (id === 'rugs') {
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.28, -r * 0.55); ctx.lineTo(0, -r * 0.8); ctx.lineTo(r * 0.28, -r * 0.55);
+      ctx.stroke();
+    } else if (id === 'sniper') {
+      ctx.fillStyle = ink;
+      ctx.fillRect(-r * 0.52, -r * 0.16, r * 1.04, r * 0.18);
+      ctx.fillStyle = color;
+    } else if (id === 'scout') {
+      ctx.beginPath(); ctx.arc(-r * 0.2, -r * 0.72, 1.5, 0, 7); ctx.arc(r * 0.2, -r * 0.72, 1.5, 0, 7); ctx.fill();
+    } else if (id === 'curve') {
+      ctx.beginPath(); ctx.moveTo(-r * 0.7, r * 0.15); ctx.bezierCurveTo(-r * 0.1, r * 0.7, r * 0.15, -r * 0.2, r * 0.7, r * 0.05); ctx.stroke();
+    } else if (id === 'graduate') {
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.55, -r * 0.28); ctx.lineTo(0, -r * 0.72); ctx.lineTo(r * 0.55, -r * 0.28); ctx.closePath();
+      ctx.fill();
+    } else if (id === 'buy') {
+      ctx.beginPath(); ctx.moveTo(0, -r * 0.85); ctx.lineTo(0, -r * 0.52); ctx.moveTo(-r * 0.14, -r * 0.72); ctx.lineTo(0, -r * 0.88); ctx.lineTo(r * 0.14, -r * 0.72); ctx.stroke();
+    } else if (id === 'sell') {
+      ctx.beginPath(); ctx.moveTo(0, r * 0.78); ctx.lineTo(0, r * 0.52); ctx.moveTo(-r * 0.14, r * 0.66); ctx.lineTo(0, r * 0.82); ctx.lineTo(r * 0.14, r * 0.66); ctx.stroke();
+    } else if (id === 'exits') {
+      ctx.beginPath(); ctx.roundRect(-r * 0.16, -r * 0.82, r * 0.32, r * 0.28, 2); ctx.fill();
+    } else if (id === 'monitor') {
+      ctx.beginPath(); ctx.ellipse(0, -r * 0.08, r * 0.42, r * 0.22, 0, 0, 7); ctx.stroke();
+    } else if (id === 'withdraw') {
+      ctx.beginPath(); ctx.arc(0, r * 0.02, r * 0.18, Math.PI * 0.15, Math.PI * 1.85); ctx.stroke();
+    } else if (id === 'share') {
+      ctx.beginPath(); ctx.moveTo(r * 0.22, -r * 0.1); ctx.lineTo(r * 0.62, -r * 0.38); ctx.moveTo(r * 0.22, 0.05); ctx.lineTo(r * 0.62, r * 0.32); ctx.stroke();
+    } else if (id === 'errors') {
+      ctx.fillStyle = cream;
+    }
+
+    // Eyes
+    ctx.fillStyle = ink;
+    const eyeY = (id === 'sniper') ? -r * 0.02 : -r * 0.12;
+    if (id === 'sniper') {
+      ctx.fillRect(-r * 0.28, eyeY - 1, r * 0.18, 3);
+      ctx.fillRect(r * 0.1, eyeY - 1, r * 0.18, 3);
+    } else if (id === 'monitor') {
+      ctx.beginPath(); ctx.arc(0, -r * 0.08, r * 0.1, 0, 7); ctx.fill();
+    } else {
+      const ex = id === 'scout' ? r * 0.2 : r * 0.16;
+      const erx = id === 'scout' ? 2.4 : 2.1;
+      const ery = id === 'curve' ? 3.1 : 2.6;
+      ctx.beginPath(); ctx.ellipse(-ex, eyeY, erx, ery, 0.15, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(ex, eyeY - (id === 'graduate' ? 1.2 : 0), erx, ery, -0.15, 0, 7); ctx.fill();
+    }
+
+    // Mouth / smile
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    if (id === 'errors') {
+      ctx.moveTo(-r * 0.12, r * 0.2); ctx.lineTo(r * 0.12, r * 0.2);
+    } else if (id === 'buy' || id === 'share' || id === 'scout') {
+      ctx.arc(0, r * 0.1, r * 0.16, 0.15, Math.PI - 0.15);
+    } else if (id === 'risk') {
+      ctx.moveTo(-r * 0.08, r * 0.18); ctx.lineTo(r * 0.08, r * 0.18);
+    } else {
+      ctx.arc(0, r * 0.08, r * 0.14, 0.2, Math.PI - 0.2);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function screenTone(ev) {
+    if (!ev) return '#D4D4D8';
+    if (ev.ok === false || ev.type === 'reject' || ev.type === 'error') return '#FCA5A5';
+    if (ev.type === 'pass' || ev.type === 'buy' || ev.type === 'sell' || ev.ok === true) return '#86EFAC';
+    if (ev.type === 'price' || ev.type === 'candidate') return '#C4B5FD';
+    if (ev.type === 'exit') return '#FCD34D';
+    return '#D4D4D8';
+  }
+
+  function screenLine(ev) {
+    if (!ev) return '';
+    const raw = String(ev.message || '').replace(/\s+/g, ' ').trim();
+    if (raw) return raw.length > 42 ? raw.slice(0, 41) + '…' : raw;
+    const sym = ev.symbol ? ('$' + String(ev.symbol).replace(/^\$/, '')) : '';
+    const t = ev.type || 'event';
+    const s = [sym, t].filter(Boolean).join(' · ');
+    return s.length > 42 ? s.slice(0, 41) + '…' : s;
+  }
+
+  function pushScreen(id, ev) {
+    if (!id || !ev || ev.type === 'hello') return;
+    const line = screenLine(ev);
+    if (!line) return;
+    const rows = state.screens[id] || (state.screens[id] = []);
+    const last = rows[rows.length - 1];
+    if (last && last.text === line && (ev.at || 0) - (last.at || 0) < 800) return;
+    rows.push({ text: line, at: ev.at || Date.now(), tone: screenTone(ev) });
+    if (rows.length > SCREEN_CAP) rows.splice(0, rows.length - SCREEN_CAP);
+  }
+
+  function agentMode(n, now) {
+    const id = n.id;
+    const blockedCap = !!(state.status && (state.status.dailyLossHit || state.status.goalHold) && (id === 'risk' || id === 'buy'));
+    if (blockedCap) return 'blocked';
+    const pul = state.pulse.get(id);
+    if (pul && (now - pul.at) < 1600) return pul.err ? 'blocked' : 'working';
+    const st = state.stats[id];
+    if (st && st.lastAt && (Date.now() - st.lastAt) < 15000) return 'waiting';
+    return 'idle';
+  }
+
+  function modeColor(mode) {
+    if (mode === 'working') return '#22C55E';
+    if (mode === 'waiting') return '#F59E0B';
+    if (mode === 'blocked') return '#EF4444';
+    return '#52525B';
+  }
+
+  function clipText(ctx, text, maxW) {
+    if (!text) return '';
+    if (ctx.measureText(text).width <= maxW) return text;
+    let s = text;
+    while (s.length > 1 && ctx.measureText(s + '…').width > maxW) s = s.slice(0, -1);
+    return s + '…';
+  }
+
+  function drawMonitor(ctx, n, x, y, w, h, now, mode) {
+    // Computer bezel
+    ctx.fillStyle = '#1A1A1E';
+    ctx.strokeStyle = '#2A2A30';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, 7); ctx.fill(); ctx.stroke();
+    // Title bar
+    ctx.fillStyle = '#121216';
+    ctx.beginPath(); ctx.roundRect(x + 1, y + 1, w - 2, 12, 5);
+    ctx.fill();
+    const dots = ['#F43F5E', '#F59E0B', '#22C55E'];
+    dots.forEach((c, i) => {
+      ctx.beginPath(); ctx.fillStyle = c; ctx.globalAlpha = 0.7;
+      ctx.arc(x + 10 + i * 8, y + 7, 2, 0, 7); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#52525B';
+    ctx.font = '600 7px Inter,system-ui,sans-serif';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText((n.name || n.id).toLowerCase() + '.sh', x + w - 6, y + 7);
+
+    const sx = x + 4, sy = y + 14, sw = w - 8, sh = h - 18;
+    ctx.fillStyle = '#070709';
+    ctx.beginPath(); ctx.roundRect(sx, sy, sw, sh, 4); ctx.fill();
+
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(sx, sy, sw, sh, 4); ctx.clip();
+
+    const rows = state.screens[n.id] || [];
+    const lineH = 11;
+    const maxShow = Math.min(SCREEN_CAP, Math.floor((sh - 4) / lineH));
+    const shown = rows.slice(-maxShow);
+    ctx.font = '600 8px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    if (!shown.length) {
+      const blink = (Math.floor(now / 530) % 2) === 0;
+      ctx.fillStyle = '#3F3F46';
+      ctx.fillText('idle', sx + 5, sy + sh - 8);
+      if (blink) {
+        ctx.fillStyle = '#71717A';
+        ctx.fillRect(sx + 5 + ctx.measureText('idle ').width, sy + sh - 13, 5, 9);
+      }
+    } else {
+      shown.forEach((row, i) => {
+        const yy = sy + 8 + i * lineH;
+        ctx.fillStyle = row.tone || '#D4D4D8';
+        ctx.fillText(clipText(ctx, row.text, sw - 10), sx + 5, yy);
+      });
+      if (mode === 'working') {
+        const blink = (Math.floor(now / 400) % 2) === 0;
+        if (blink) {
+          const last = shown[shown.length - 1];
+          const yy = sy + 8 + (shown.length - 1) * lineH;
+          const tw = ctx.measureText(clipText(ctx, last.text, sw - 16)).width;
+          ctx.fillStyle = last.tone || '#D4D4D8';
+          ctx.fillRect(sx + 6 + tw, yy - 5, 5, 9);
+        }
+      }
+    }
+
+    if (mode === 'working') {
+      const shimmer = ((now / 700) % 1);
+      const gx = sx + shimmer * (sw + 40) - 40;
+      const g = ctx.createLinearGradient(gx, sy, gx + 50, sy);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(0.5, 'rgba(255,255,255,0.07)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(sx, sy, sw, sh);
+    }
+    ctx.restore();
+  }
+
+  function drawAgentCard(ctx, n, now, breath) {
+    const pul = state.pulse.get(n.id);
+    const age = pul ? (now - pul.at) / (pul.win ? 1400 : 900) : 1;
+    const amt = pul && age < 1 ? (1 - age) * (pul.pow || 1) : 0;
+    const feedIdle = n.id === 'feed' ? 0.22 + 0.22 * breath : 0;
+    const mode = agentMode(n, now);
+    const outline = mode === 'blocked' && amt > 0.1 ? '#EF4444' : (pul && pul.win && amt > 0.15 ? '#22C55E' : n.color);
+    const box = cardBox(n);
+    const st = state.stats[n.id] || { events: 0, passes: 0, rejects: 0, lastAt: 0, lastMessage: '' };
+    const sh = state.shown[n.id] || (state.shown[n.id] = { e: 0, p: 0, r: 0, pnl: 0 });
+    const evN = Math.round(sh.e);
+    const last = state.lastEv[n.id];
+    const status = (last && screenLine(last)) || st.lastMessage || '';
+
+    ctx.save();
+    ctx.translate(n.x, n.y);
+    if (amt) ctx.scale(1 + 0.03 * Math.min(amt, 1.8), 1 + 0.03 * Math.min(amt, 1.8));
+    ctx.translate(-n.x, -n.y);
+
+    ctx.shadowColor = outline;
+    ctx.shadowBlur = 8 + Math.max(amt, feedIdle) * 18;
+    ctx.fillStyle = '#121214';
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 16);
+    ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Avatar
+    ctx.save();
+    ctx.translate(box.x + 28, box.y + 28);
+    drawAvatar(ctx, n, 20);
+    ctx.restore();
+
+    // Status dot
+    const dc = modeColor(mode);
+    ctx.beginPath();
+    ctx.fillStyle = dc;
+    ctx.shadowColor = dc;
+    ctx.shadowBlur = mode === 'idle' ? 0 : 8;
+    ctx.arc(box.x + box.w - 16, box.y + 16, 4, 0, 7);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Name + role
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = '700 11px Inter,system-ui,sans-serif';
+    ctx.fillStyle = '#FAFAFA';
+    const nameX = box.x + 52;
+    const nameMax = box.w - 52 - 28;
+    ctx.fillText(clipText(ctx, agentTitle(n), nameMax), nameX, box.y + 16);
+
+    // Live status line
+    ctx.font = '600 9px Inter,system-ui,sans-serif';
+    ctx.fillStyle = mode === 'blocked' ? '#FCA5A5' : (mode === 'working' ? '#E4E4E7' : '#A1A1AA');
+    const statusText = status ? clipText(ctx, status, nameMax) : (mode === 'idle' ? '—' : '');
+    ctx.fillText(statusText, nameX, box.y + 30);
+
+    if (mode === 'working') {
+      const shimmer = ((now / 600) % 1);
+      const tw = ctx.measureText(statusText).width || nameMax * 0.6;
+      const gx = nameX + shimmer * (tw + 30) - 20;
+      const g = ctx.createLinearGradient(gx, 0, gx + 28, 0);
+      g.addColorStop(0, 'rgba(255,255,255,0)');
+      g.addColorStop(0.5, 'rgba(255,255,255,0.28)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(nameX, box.y + 24, Math.min(nameMax, tw + 8), 12);
+    }
+
+    // Last active + count
+    ctx.font = '600 8px Inter,system-ui,sans-serif';
+    ctx.fillStyle = '#71717A';
+    const ago = st.lastAt ? ('last active ' + relTime(st.lastAt)) : 'last active —';
+    const count = evN ? ('  ·  ' + evN) : '';
+    ctx.fillText(clipText(ctx, ago + count, nameMax), nameX, box.y + 43);
+
+    drawMonitor(ctx, n, box.x + 10, box.y + 56, box.w - 20, box.h - 66, now, mode);
+    ctx.restore();
+  }
+
   function findEdge(from, to) {
     return state.edges.find((e) => e.from === from && e.to === to)
       || (to ? state.edges.find((e) => e.to === to && (!from || e.from === from)) : null);
@@ -218,6 +594,7 @@
     if (ev.type === 'reject' || ev.ok === false) st.rejects++;
     if (ev.type === 'error') st.errors++;
     state.lastEv[n] = ev;
+    if (n) pushScreen(n, ev);
     const pow = powerOf(ev);
     const reason = ev.data && ev.data.reason;
     if (reason === 'daily cap') setStatus({ dailyLossHit: true });
@@ -313,11 +690,11 @@
     if (implicit) { const v = viewSize(); viewW = v.w; viewH = v.h; }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of state.nodes) {
-      minX = Math.min(minX, n.x - 110); maxX = Math.max(maxX, n.x + 130);
-      minY = Math.min(minY, n.y - 90); maxY = Math.max(maxY, n.y + 110);
+      minX = Math.min(minX, n.x - CARD_W / 2 - 24); maxX = Math.max(maxX, n.x + CARD_W / 2 + 24);
+      minY = Math.min(minY, n.y - CARD_H / 2 - 20); maxY = Math.max(maxY, n.y + CARD_H / 2 + 20);
     }
     const w = Math.max(200, maxX - minX), h = Math.max(200, maxY - minY);
-    const k = Math.max(0.22, Math.min(1.35, Math.min((viewW - 48) / w, (viewH - 48) / h)));
+    const k = Math.max(0.18, Math.min(1.2, Math.min((viewW - 48) / w, (viewH - 48) / h)));
     const fit = { k, x: (viewW - w * k) / 2 - minX * k, y: (viewH - h * k) / 2 - minY * k };
     if (implicit) state.fit = fit;
     return fit;
@@ -332,8 +709,8 @@
   function nodeBounds() {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of state.nodes) {
-      minX = Math.min(minX, n.x - 110); maxX = Math.max(maxX, n.x + 130);
-      minY = Math.min(minY, n.y - 90); maxY = Math.max(maxY, n.y + 110);
+      minX = Math.min(minX, n.x - CARD_W / 2 - 24); maxX = Math.max(maxX, n.x + CARD_W / 2 + 24);
+      minY = Math.min(minY, n.y - CARD_H / 2 - 20); maxY = Math.max(maxY, n.y + CARD_H / 2 + 20);
     }
     return { minX, minY, maxX, maxY };
   }
@@ -365,8 +742,8 @@
         let sx = 0, sy = 0, sw = 0;
         for (const a of recent) { sx += a.x * a.w; sy += a.y * a.w; sw += a.w; }
         const cx = sx / sw, cy = sy / sw;
-        const k = fit.k * 1.05;
-        const blend = 0.22;
+        const k = fit.k * (isMob() ? 2.1 : 1.55);
+        const blend = 0.28;
         let tx = fit.x * (1 - blend) + (viewW / 2 - cx * k) * blend;
         let ty = fit.y * (1 - blend) + (viewH / 2 - cy * k) * blend;
         const c = clampCam(tx, ty, k, viewW, viewH, fit);
@@ -395,7 +772,10 @@
   }
   function hitNode(sx, sy) {
     const w = screenToWorld(sx, sy);
-    return state.nodes.find((n) => Math.abs(w.x - n.x) <= 30 && w.y >= n.y - 30 && w.y <= n.y + 62) || null;
+    return state.nodes.find((n) => {
+      const b = cardBox(n);
+      return w.x >= b.x && w.x <= b.x + b.w && w.y >= b.y && w.y <= b.y + b.h;
+    }) || null;
   }
 
   function stepShown(dt) {
@@ -494,59 +874,9 @@
       ctx.restore();
     }
 
-    // nodes
+    // agent cards
     const breath = 0.5 + 0.5 * Math.sin(now / 900);
-    for (const n of state.nodes) {
-      const pul = state.pulse.get(n.id);
-      const age = pul ? (now - pul.at) / (pul.win ? 1400 : 900) : 1;
-      const amt = pul && age < 1 ? (1 - age) * (pul.pow || 1) : 0;
-      const feedIdle = n.id === 'feed' ? 0.35 + 0.35 * breath : 0;
-      const glow = 7 + Math.max(amt, feedIdle) * 22;
-      const outline = pul && pul.err && amt > 0.15 ? '#F43F5E' : (pul && pul.win && amt > 0.15 ? '#22C55E' : n.color);
-      ctx.save();
-      ctx.translate(n.x, n.y);
-      if (amt) ctx.scale(1 + 0.06 * Math.min(amt, 1.8), 1 + 0.06 * Math.min(amt, 1.8));
-      ctx.shadowColor = outline;
-      ctx.shadowBlur = glow;
-      ctx.fillStyle = '#121214';
-      ctx.strokeStyle = outline;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.roundRect(-NODE / 2, -NODE / 2, NODE, NODE, R);
-      ctx.fill(); ctx.stroke();
-      ctx.shadowBlur = 0;
-      icon(ctx, n.icon);
-
-      // rolling counters inside the node
-      const st = state.stats[n.id] || { events: 0, passes: 0, rejects: 0 };
-      const sh = state.shown[n.id] || (state.shown[n.id] = { e: 0, p: 0, r: 0, pnl: 0 });
-      const evN = Math.round(sh.e);
-      ctx.font = '700 8px Inter,system-ui,sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillStyle = 'rgba(255,255,255,0.8)';
-      if (n.id === 'exits' && state.pnl.exits != null) {
-        ctx.fillStyle = sh.pnl >= 0 ? '#86EFAC' : '#FCA5A5';
-        ctx.fillText((sh.pnl >= 0 ? '+' : '') + Math.round(sh.pnl * 100) + '%', 0, NODE / 2 - 9);
-      } else if (evN) {
-        ctx.fillText(String(evN), 0, NODE / 2 - 9);
-      }
-      ctx.restore();
-
-      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-      ctx.font = '700 11px Inter,system-ui,sans-serif';
-      ctx.fillStyle = '#FAFAFA';
-      ctx.fillText(`${n.kind}: ${n.name}`, n.x, n.y + NODE / 2 + 8);
-      ctx.font = '500 9px Inter,system-ui,sans-serif';
-      ctx.fillStyle = '#A1A1AA';
-      ctx.fillText(n.sub, n.x, n.y + NODE / 2 + 22);
-      if (st.passes || st.rejects) {
-        ctx.fillStyle = st.rejects ? '#F43F5E' : '#22C55E';
-        const bits = [];
-        if (st.passes) bits.push(Math.round(sh.p) + ' pass');
-        if (st.rejects) bits.push(Math.round(sh.r) + ' rej');
-        ctx.fillText(bits.join(' · '), n.x, n.y + NODE / 2 + 34);
-      }
-    }
+    for (const n of state.nodes) drawAgentCard(ctx, n, now, breath);
 
     if (target && target.watermark) {
       const cssW = canvas.width / dpr, cssH = canvas.height / dpr;
@@ -719,7 +1049,7 @@
     const ago = st.lastAt ? relTime(st.lastAt) : '—';
     let extra = '';
     if (n.id === 'exits' && state.pnl.exits != null) extra = `<div>last PnL <b>${(state.pnl.exits >= 0 ? '+' : '') + Math.round(state.pnl.exits * 100)}%</b></div>`;
-    tip.innerHTML = `<b>${n.kind}: ${n.name}</b><div><span>${st.events || 0} events</span> · <span>${st.passes || 0} pass</span> · <span>${st.rejects || 0} rej</span></div><div>last ${ago}${last && last.message ? ' — ' + esc(last.message) : ''}</div>${extra}`;
+    tip.innerHTML = `<b>${esc(agentTitle(n))}</b><div><span>${st.events || 0} events</span> · <span>${st.passes || 0} pass</span> · <span>${st.rejects || 0} rej</span></div><div>last active ${ago}${last && last.message ? ' — ' + esc(last.message) : ''}</div>${extra}`;
     tip.classList.remove('hidden');
     const pad = 16;
     const tw = 220;
@@ -829,6 +1159,10 @@
     if (d.stats) state.stats = d.stats;
     if (d.status) setStatus(d.status);
     const evs = d.events || [];
+    state.screens = {};
+    for (const ev of evs) {
+      if (ev && ev.node) pushScreen(ev.node, ev);
+    }
     // replay recent events as pulses/heat without flooding chips
     for (const ev of evs.slice(-40)) {
       const n = ev.node;
@@ -925,6 +1259,7 @@
       shown: JSON.parse(JSON.stringify(state.shown)),
       pnl: { ...state.pnl },
       lastEv: { ...state.lastEv },
+      screens: JSON.parse(JSON.stringify(state.screens || {})),
       particles: state.particles.map((p) => ({ ...p })),
       chips: state.chips.map((c) => ({ ...c })),
       chipBySymbol: new Map(state.chipBySymbol),
@@ -942,6 +1277,7 @@
     state.shown = s.shown;
     state.pnl = s.pnl;
     state.lastEv = s.lastEv;
+    state.screens = s.screens || {};
     state.particles = s.particles;
     state.chips = s.chips;
     state.chipBySymbol = s.chipBySymbol;
@@ -967,6 +1303,7 @@
     state.shown = {};
     state.pnl = {};
     state.lastEv = {};
+    state.screens = {};
     for (const ev of events || []) onEvent(ev, { silent: true, now: ev.at });
     for (const id of Object.keys(state.stats)) {
       const st = state.stats[id];

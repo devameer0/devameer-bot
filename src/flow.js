@@ -8,23 +8,23 @@ const HISTORY_MAX = 20000;
 const SECRET_KEY = /pass(word|phrase)?|secret|private.?key|api.?key|session|cookie|authorization|bearer|mnemonic|seed|recovery|database_url|connection.?string|wallet.?private|admin.?password/i;
 
 const NODES = [
-  { id: 'feed',     kind: 'Feed',      name: 'PumpPortal',        sub: 'New tokens / trades', color: '#3B82F6', x: 90,   y: 190, icon: 'feed' },
-  { id: 'jupiter',  kind: 'Price',     name: 'Jupiter',           sub: 'SOL/USD + grads',     color: '#A855F7', x: 90,   y: 370, icon: 'jupiter' },
-  { id: 'rpc',      kind: 'RPC',       name: 'Solana Curve',      sub: 'On-chain reads',      color: '#06B6D4', x: 90,   y: 550, icon: 'rpc' },
-  { id: 'rugs',     kind: 'Filter',    name: 'Rug Checks',        sub: 'Dev / bundle / liq',  color: '#F97316', x: 340,  y: 190, icon: 'rugs' },
-  { id: 'sniper',   kind: 'Agent',     name: 'Sniper',            sub: 'Fresh launches',      color: '#3B82F6', x: 590,  y: 70,  icon: 'sniper' },
-  { id: 'scout',    kind: 'Agent',     name: 'Scout',             sub: 'Live + X hype',       color: '#EF4444', x: 590,  y: 190, icon: 'scout' },
-  { id: 'curve',    kind: 'Agent',     name: 'Curve',             sub: '30–75% on curve',     color: '#22C55E', x: 590,  y: 310, icon: 'curve' },
-  { id: 'graduate', kind: 'Agent',     name: 'Graduate',          sub: '85–97% on curve',     color: '#A855F7', x: 590,  y: 430, icon: 'graduate' },
-  { id: 'risk',     kind: 'Risk',      name: 'Limits',            sub: 'Size / loss / caps',  color: '#EAB308', x: 840,  y: 250, icon: 'risk' },
-  { id: 'buy',      kind: 'Action',    name: 'Buy',               sub: 'Paper or live',       color: '#22C55E', x: 1090, y: 190, icon: 'buy' },
-  { id: 'monitor',  kind: 'Watch',     name: 'Positions',         sub: 'Open PnL / curve',    color: '#22D3EE', x: 1090, y: 430, icon: 'monitor' },
-  { id: 'exits',    kind: 'Condition', name: 'Exits',             sub: 'TP / SL / time',      color: '#F59E0B', x: 1340, y: 430, icon: 'exits' },
-  { id: 'sell',     kind: 'Action',    name: 'Sell',              sub: 'Close position',      color: '#EC4899', x: 1590, y: 430, icon: 'sell' },
-  { id: 'db',       kind: 'Data',      name: 'Database',          sub: 'Postgres write',      color: '#818CF8', x: 1340, y: 190, icon: 'db' },
-  { id: 'share',    kind: 'Share',     name: 'Replay',            sub: 'Cards + MP4',         color: '#E879F9', x: 1840, y: 430, icon: 'share' },
-  { id: 'withdraw', kind: 'Action',    name: 'Withdraw',          sub: 'To Phantom',          color: '#14B8A6', x: 1090, y: 640, icon: 'withdraw' },
-  { id: 'errors',   kind: 'Alert',     name: 'Errors / Alerts',   sub: 'Fails + rejects',     color: '#F43F5E', x: 840,  y: 640, icon: 'errors' },
+  { id: 'feed',     kind: 'Agent', name: 'Herald',   role: 'Token feed',      sub: 'Token feed',      color: '#3B82F6', x: 170,  y: 200, icon: 'feed' },
+  { id: 'jupiter',  kind: 'Agent', name: 'Quote',    role: 'SOL price',       sub: 'SOL price',       color: '#A855F7', x: 170,  y: 470, icon: 'jupiter' },
+  { id: 'rpc',      kind: 'Agent', name: 'Chain',    role: 'On-chain',        sub: 'On-chain',        color: '#06B6D4', x: 170,  y: 740, icon: 'rpc' },
+  { id: 'rugs',     kind: 'Agent', name: 'Sentinel', role: 'Rug filter',      sub: 'Rug filter',      color: '#F97316', x: 520,  y: 200, icon: 'rugs' },
+  { id: 'sniper',   kind: 'Agent', name: 'Sniper',   role: 'Fresh launches',  sub: 'Fresh launches',  color: '#3B82F6', x: 870,  y: 120, icon: 'sniper' },
+  { id: 'scout',    kind: 'Agent', name: 'Scout',    role: 'Live hype',       sub: 'Live hype',       color: '#EF4444', x: 870,  y: 390, icon: 'scout' },
+  { id: 'curve',    kind: 'Agent', name: 'Rider',    role: 'Bonding curve',   sub: 'Bonding curve',   color: '#22C55E', x: 870,  y: 660, icon: 'curve' },
+  { id: 'graduate', kind: 'Agent', name: 'Graduate', role: 'Near-grad',       sub: 'Near-grad',       color: '#A855F7', x: 870,  y: 930, icon: 'graduate' },
+  { id: 'risk',     kind: 'Agent', name: 'Oracle',   role: 'Risk limits',     sub: 'Risk limits',     color: '#EAB308', x: 1220, y: 390, icon: 'risk' },
+  { id: 'buy',      kind: 'Agent', name: 'Broker',   role: 'Buyer',           sub: 'Buyer',           color: '#22C55E', x: 1570, y: 200, icon: 'buy' },
+  { id: 'monitor',  kind: 'Agent', name: 'Watch',    role: 'Positions',       sub: 'Positions',       color: '#22D3EE', x: 1570, y: 660, icon: 'monitor' },
+  { id: 'exits',    kind: 'Agent', name: 'Keeper',   role: 'Exits',           sub: 'Exits',           color: '#F59E0B', x: 1920, y: 660, icon: 'exits' },
+  { id: 'sell',     kind: 'Agent', name: 'Closer',   role: 'Sells',           sub: 'Sells',           color: '#EC4899', x: 2270, y: 660, icon: 'sell' },
+  { id: 'db',       kind: 'Agent', name: 'Archivist',role: 'Ledger',          sub: 'Ledger',          color: '#818CF8', x: 1920, y: 200, icon: 'db' },
+  { id: 'share',    kind: 'Agent', name: 'Editor',   role: 'Replays',         sub: 'Replays',         color: '#E879F9', x: 2620, y: 660, icon: 'share' },
+  { id: 'withdraw', kind: 'Agent', name: 'Vault',    role: 'Withdraw',        sub: 'Withdraw',        color: '#14B8A6', x: 1570, y: 930, icon: 'withdraw' },
+  { id: 'errors',   kind: 'Agent', name: 'Alarm',    role: 'Alerts',          sub: 'Alerts',          color: '#F43F5E', x: 1220, y: 930, icon: 'errors' },
 ];
 
 const EDGES = [
@@ -57,7 +57,7 @@ const EDGES = [
   { id: 'rpc-errors',      from: 'rpc',      to: 'errors' },
 ];
 
-const WORLD = { w: 1980, h: 780, pad: 80 };
+const WORLD = { w: 2880, h: 1160, pad: 120 };
 
 const ring = [];
 const pending = [];
