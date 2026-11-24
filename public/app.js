@@ -300,12 +300,17 @@ function rangeStats() {
   const startEq = (S.summary?.stack || 0) + startPnl;
   const pnlPct = startEq ? pnl / startEq : 0;
   const chrono = closed.slice().sort((a, c) => a.closedAt - c.closedAt);
-  const curve = [{ t: chrono[0] ? chrono[0].closedAt - 60000 : b.from, pnl: 0 }];
-  let run = 0;
-  for (const t of chrono) { run += t.pnlSol || 0; curve.push({ t: t.closedAt, pnl: run }); }
-  if (includeOpen && unreal) curve.push({ t: Date.now(), pnl: run + unreal });
-  if (curve.length === 1) curve.push({ t: b.to, pnl: 0 });
-  return { b, closed, open, pnl, unreal, wins, count: closed.length, winRate: closed.length ? wins / closed.length : 0, best: ranked[0] || null, worst: ranked.length ? ranked[ranked.length - 1] : null, curve, pnlPct };
+  const curve = [{ t: chrono[0] ? chrono[0].closedAt - 60000 : b.from, pnl: 0, trades: 0, wins: 0 }];
+  let run = 0, n = 0, w = 0;
+  for (const t of chrono) {
+    run += t.pnlSol || 0;
+    n++;
+    if ((t.pnlSol || 0) > 0) w++;
+    curve.push({ t: t.closedAt, pnl: run, trades: n, wins: w });
+  }
+  if (includeOpen && unreal) curve.push({ t: Date.now(), pnl: run + unreal, trades: n, wins: w });
+  if (curve.length === 1) curve.push({ t: b.to, pnl: 0, trades: 0, wins: 0 });
+  return { b, closed, open, pnl, unreal, wins, count: closed.length, winRate: closed.length ? wins / closed.length : 0, best: ranked[0] || null, worst: ranked.length ? ranked[ranked.length - 1] : null, curve, pnlPct, startEq };
 }
 function paintSpark(points, color) {
   const svg = $('#spark'); if (!svg) return;
@@ -374,6 +379,7 @@ function accountShareData() {
   return {
     kind: 'account', range, label: rs.b.label, from: rs.b.from, to: rs.b.to,
     pnlSol: rs.pnl, pnlUsd: usd(rs.pnl), pnlPct: rs.pnlPct, unrealSol: rs.unreal,
+    stack: S.summary?.stack || 0, startEq: rs.startEq,
     trades: rs.count, wins: rs.wins, winRate: rs.winRate,
     best: rs.best && { symbol: rs.best.symbol, name: rs.best.name || '', pnlSol: rs.best.pnlSol, pnlPct: rs.best.pnlPct },
     worst: rs.worst && { symbol: rs.worst.symbol, name: rs.worst.name || '', pnlSol: rs.worst.pnlSol, pnlPct: rs.worst.pnlPct },

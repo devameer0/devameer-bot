@@ -150,7 +150,10 @@
     if (typeof MediaRecorder === 'undefined' || !canvas.captureStream) return null;
     const stream = canvas.captureStream(FPS);
     const mime = [
-      'video/mp4;codecs=avc1.42001f',
+      'video/mp4;codecs=avc1.640028',
+      'video/mp4;codecs=avc1.4d0028',
+      'video/mp4;codecs=avc1.420028',
+      'video/mp4;codecs=avc1',
       'video/mp4',
       'video/webm;codecs=vp9',
       'video/webm;codecs=vp8',
@@ -175,18 +178,24 @@
     };
   }
 
+  async function blobLooksLikeMp4(blob) {
+    if (!blob || blob.size < 8) return false;
+    const u8 = new Uint8Array(await blob.slice(4, 8).arrayBuffer());
+    return String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) === 'ftyp';
+  }
+
   async function finalizeBlob(raw, fallbackKind) {
     if (!raw) throw new Error('nothing recorded');
-    if (raw.type && raw.type.includes('mp4') && raw.size > 1000) return { blob: raw, ext: 'mp4' };
-    if (fallbackKind === 'mp4') return { blob: raw, ext: 'mp4' };
     try {
       setStatus('Transcoding to MP4…');
       const mp4 = await transcodeOnServer(raw);
-      if (mp4 && mp4.size > 1000) return { blob: mp4, ext: 'mp4' };
+      if (mp4 && mp4.size > 1000 && await blobLooksLikeMp4(mp4)) return { blob: mp4, ext: 'mp4' };
     } catch (e) {
       console.warn('transcode failed', e);
     }
-    return { blob: raw, ext: 'webm' };
+    // Never download WebM under a .mp4 name. Keep a client MP4 only if the container is real.
+    if (await blobLooksLikeMp4(raw)) return { blob: raw, ext: 'mp4' };
+    throw new Error('Could not encode a real H.264 MP4. Server transcode failed.');
   }
 
   async function makeEncoder(canvas, W, H) {

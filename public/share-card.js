@@ -27,7 +27,9 @@
   const fmtUsd = (v, sign = true) => {
     if (v == null || !Number.isFinite(v)) return '—';
     const a = Math.abs(v);
-    const n = a >= 1000 ? a.toLocaleString('en-US', { maximumFractionDigits: 0 }) : a >= 100 ? a.toFixed(0) : a.toFixed(2);
+    const n = a >= 1000
+      ? a.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : a.toFixed(2);
     return (sign ? (v < 0 ? '−' : '+') : (v < 0 ? '−' : '')) + '$' + n;
   };
   const fmtSol = (v, sign = true) => {

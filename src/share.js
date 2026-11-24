@@ -128,21 +128,23 @@ function publicAccount(engine, q = {}) {
   const stack = engine.stack || cfg.PAPER_STACK_SOL;
   const startEq = stack + startPnl;
   const pnlPct = startEq ? pnlSol / startEq : 0;
-  const curve = [{ t: b.from || (closed[0] ? closed[0].closedAt - 60000 : Date.now() - 60000), pnl: 0 }];
-  let run = 0;
+  const curve = [{ t: b.from || (closed[0] ? closed[0].closedAt - 60000 : Date.now() - 60000), pnl: 0, trades: 0, wins: 0 }];
+  let run = 0, n = 0, w = 0;
   for (const t of closed.slice().sort((a, c) => a.closedAt - c.closedAt)) {
     run += t.pnlSol;
-    curve.push({ t: t.closedAt, pnl: run });
+    n++;
+    if ((t.pnlSol || 0) > 0) w++;
+    curve.push({ t: t.closedAt, pnl: run, trades: n, wins: w });
   }
-  if (includeOpen && unreal) curve.push({ t: Date.now(), pnl: run + unreal });
-  if (curve.length === 1) curve.push({ t: b.to, pnl: 0 });
+  if (includeOpen && unreal) curve.push({ t: Date.now(), pnl: run + unreal, trades: n, wins: w });
+  if (curve.length === 1) curve.push({ t: b.to, pnl: 0, trades: 0, wins: 0 });
   const solUsd = engine.market.solUsd || 0;
   return {
     kind: 'account',
     range: b.range, label: b.label, from: b.from, to: b.to,
     pnlSol, pnlUsd: pnlSol * solUsd, pnlPct, unrealSol: unreal,
     trades: closed.length, wins, winRate: closed.length ? wins / closed.length : 0,
-    best, worst, curve, stack, solUsd,
+    best, worst, curve, stack, startEq, solUsd,
     paper: engine.mode !== 'LIVE',
     botName: cfg.BOT_NAME, badge: cfg.BADGE,
     openCount: open.length,

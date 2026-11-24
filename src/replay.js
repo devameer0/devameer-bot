@@ -63,7 +63,9 @@ async function renderMp4({ data, theme, aspect, seconds, bgImage }) {
       );
     }
     args.push(
-      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-crf', '23',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', '30',
+      '-preset', 'ultrafast', '-crf', '23',
+      '-profile:v', 'high', '-level', '4.1',
       '-c:a', 'aac', '-b:a', '64k', '-shortest', '-movflags', '+faststart',
       out,
     );
@@ -101,15 +103,18 @@ async function transcodeWebm(buf) {
   if (!buf || buf.length > 25 * 1024 * 1024) { const e = new Error('Video must be 25 MB or smaller'); e.status = 400; throw e; }
   busy = true;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devameer-xcode-'));
-  const inn = path.join(tmp, 'in.webm');
+  const inn = path.join(tmp, 'in.bin');
   const out = path.join(tmp, 'out.mp4');
   try {
     fs.writeFileSync(inn, buf);
     await new Promise((res, rej) => {
       const ff = spawn(ffmpegBin(), [
         '-y', '-hide_banner', '-loglevel', 'error', '-i', inn,
-        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-crf', '23',
-        '-an', '-movflags', '+faststart', out,
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=30',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', '30',
+        '-preset', 'ultrafast', '-crf', '23',
+        '-profile:v', 'high', '-level', '4.1',
+        '-threads', '0', '-an', '-movflags', '+faststart', out,
       ]);
       let err = '';
       ff.stderr.on('data', (d) => { err += d; });

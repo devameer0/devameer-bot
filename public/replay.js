@@ -42,10 +42,41 @@
 
   function ease(x) { return 1 - Math.pow(1 - Math.max(0, Math.min(1, x)), 1.12); }
 
+  // Start drawing immediately (no leading 10% blank), with a short hold on the final frame.
   function lineProgress(p) {
-    if (p < 0.1) return 0;
-    if (p > 0.88) return 1;
-    return ease((p - 0.1) / 0.78);
+    const endHold = 0.04;
+    if (p <= 0) return 0;
+    if (p >= 1 - endHold) return 1;
+    return ease(p / (1 - endHold));
+  }
+
+  function equityBase(d, curve) {
+    if (d && Number.isFinite(d.startEq) && d.startEq) return d.startEq;
+    if (d && Number.isFinite(d.stack) && d.stack) return d.stack;
+    if (d && Number.isFinite(d.pnlPct) && Math.abs(d.pnlPct) > 1e-12 && Number.isFinite(d.pnlSol)) return d.pnlSol / d.pnlPct;
+    const last = curve && curve[curve.length - 1];
+    if (d && Number.isFinite(d.pnlPct) && Math.abs(d.pnlPct) > 1e-12 && last && Number.isFinite(last.pnl)) return last.pnl / d.pnlPct;
+    return 0;
+  }
+
+  function progressCounts(shown, curve, d) {
+    const last = shown[shown.length - 1];
+    if (last && last.trades != null) return { trades: last.trades, wins: last.wins || 0 };
+    let trades = 0, wins = 0;
+    for (let i = 1; i < shown.length; i++) {
+      const isLastUnreal = i === shown.length - 1 && curve && i === curve.length - 1 && d && d.unrealSol;
+      if (isLastUnreal) continue;
+      const prev = shown[i - 1].pnl, cur = shown[i].pnl;
+      trades++;
+      if (Number.isFinite(prev) && Number.isFinite(cur) && cur - prev > 0) wins++;
+    }
+    return { trades, wins };
+  }
+
+  function signedPnl(st) {
+    if (st && Number.isFinite(st.pnlUsd)) return st.pnlUsd;
+    if (st && Number.isFinite(st.pnlSol)) return st.pnlSol;
+    return (st && st.pnlPct) || 0;
   }
 
   function stateAt(d, p) {
@@ -55,15 +86,29 @@
       const lp = lineProgress(p);
       const idx = curve.length ? Math.max(0, Math.round((curve.length - 1) * lp)) : 0;
       const shown = curve.slice(0, idx + 1);
-      const last = shown[shown.length - 1] || { pnl: 0, pct: 0 };
+      const last = shown[shown.length - 1] || { pnl: 0, pct: 0, trades: 0, wins: 0 };
       const key = (curve[0] && curve[0].pct != null && curve[0].pnl == null) ? 'pct' : 'pnl';
-      const pnlSol = key === 'pnl' ? last.pnl : null;
-      const pnlPct = key === 'pct' ? last.pct : (d.pnlPct != null && lp >= 1 ? d.pnlPct : last.pnl);
+      const base = equityBase(d, curve);
+      let pnlSol = key === 'pnl' ? (last.pnl != null ? last.pnl : 0) : (base && last.pct != null ? last.pct * base : null);
+      let pnlPct = key === 'pct'
+        ? (last.pct != null ? last.pct : 0)
+        : (base ? (last.pnl || 0) / base : 0);
+      if (lp >= 1) {
+        if (d.pnlSol != null) pnlSol = d.pnlSol;
+        if (d.pnlPct != null) pnlPct = d.pnlPct;
+      }
+      const pnlUsd = (pnlSol != null && d.solUsd) ? pnlSol * d.solUsd : (lp >= 1 ? d.pnlUsd : null);
+      let { trades, wins } = progressCounts(shown, curve, d);
+      if (lp >= 1) {
+        if (d.trades != null) trades = d.trades;
+        if (d.wins != null) wins = d.wins;
+      }
+      const winRate = trades ? (wins || 0) / trades : 0;
       const peak = shown.reduce((m, x) => {
         const v = x[key] != null ? x[key] : 0;
         return !m || v > m.v ? { p: x, v } : m;
       }, null);
-      return { kind: 'account', F, lp, p, shown, key, pnlSol: lp >= 1 && d.pnlSol != null ? d.pnlSol : pnlSol, pnlPct: lp >= 1 && d.pnlPct != null ? d.pnlPct : (key === 'pct' ? pnlPct : (d.stack ? (last.pnl || 0) / (d.stack || 1) : 0)), peak, reachedPeak: !!(peak && shown.indexOf(peak.p) >= 0 && lp > 0.2) };
+      return { kind: 'account', F, lp, p, shown, key, pnlSol, pnlPct, pnlUsd, trades, wins, winRate, peak, reachedPeak: !!(peak && shown.indexOf(peak.p) >= 0 && lp > 0) };
     }
     const ticks = (d && d.ticks) || [];
     const tBuy = d && (d.openedAt || (ticks[0] && ticks[0].t));
@@ -76,11 +121,12 @@
     if (d && d.status !== 'open' && lp >= 1 && d.pnlPct != null) pnlPct = d.pnlPct;
     let pnlSol = d && d.costSol != null ? d.costSol * pnlPct : (d && d.pnlSol);
     if (d && d.status !== 'open' && lp >= 1 && d.pnlSol != null) pnlSol = d.pnlSol;
+    const pnlUsd = (pnlSol != null && d && d.solUsd) ? pnlSol * d.solUsd : null;
     const hold = ticks.filter((x) => x.t >= (tBuy || 0) && x.t <= (tEnd || x.t));
     const peak = hold.reduce((m, x) => (!m || x.price > m.price ? x : m), null);
     const reachedPeak = !!(peak && tNow >= peak.t && lp > 0);
     const peakPct = entry && peak ? peak.price / entry - 1 : (d && d.holdPumpPct);
-    return { kind: 'trade', F, lp, p, ticks, tBuy, tEnd, tNow, entry, price, pnlPct, pnlSol, peak, reachedPeak, peakPct, open: d && d.status === 'open' };
+    return { kind: 'trade', F, lp, p, ticks, tBuy, tEnd, tNow, entry, price, pnlPct, pnlSol, pnlUsd, peak, reachedPeak, peakPct, open: d && d.status === 'open' };
   }
 
   function drawMedia(ctx, src, W, H, fit) {
@@ -245,7 +291,7 @@
     const T = ShareCard.THEMES[theme];
     const st = stateAt(d, p);
     const F = st.F;
-    const win = (st.pnlPct || 0) >= 0 || (st.pnlSol || 0) >= 0;
+    const win = signedPnl(st) >= 0;
     const accent = win ? T.green : T.red;
     const paper = !!(d && d.paper);
     const custom = !!(opts.bg && (opts.bg.video || opts.bg.image || opts.bg.el));
@@ -304,11 +350,13 @@
       ctx.fillText(solStr + (solStr && !F.hideProfit ? '   ' + pctStr : ''), L.pad, L.solY);
       const key = st.key || 'pnl';
       const pts = (st.shown || []).map((c) => ({ t: c.t, y: c[key] != null ? c[key] : 0 }));
+      if (pts.length === 1) pts.push({ t: pts[0].t + 1, y: pts[0].y });
       if (pts.length >= 2) drawChart(ctx, pts, L.chart, T, accent, []);
       ctx.font = '700 22px Inter,system-ui,sans-serif';
       ctx.fillStyle = T.mut;
-      const wr = d.trades ? Math.round((d.winRate || 0) * 100) + '% win' : 'no trades yet';
-      ctx.fillText((d.trades || 0) + ' trades · ' + wr, L.pad, L.footY);
+      const trades = st.trades != null ? st.trades : 0;
+      const wr = trades ? Math.round((st.winRate || 0) * 100) + '% win' : 'no trades yet';
+      ctx.fillText(trades + ' trades · ' + wr, L.pad, L.footY);
     } else {
       ctx.font = '800 48px Inter,system-ui,sans-serif';
       ctx.fillStyle = T.text;
@@ -390,18 +438,27 @@
     try { if (typeof document !== 'undefined' && document.fonts) await document.fonts.ready; } catch { /* ignore */ }
   }
 
+  function evenDim(n) { n = Math.round(Number(n) || 0); return n % 2 ? n + 1 : n; }
+
+  async function blobLooksLikeMp4(blob) {
+    if (!blob || blob.size < 8) return false;
+    const u8 = new Uint8Array(await blob.slice(4, 8).arrayBuffer());
+    return String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) === 'ftyp';
+  }
+
   async function encodeWebCodecs(canvas, d, opts, onProgress) {
     if (typeof VideoEncoder === 'undefined') return null;
     const { Muxer, ArrayBufferTarget } = await import('/vendor/mp4-muxer.mjs');
     const L = layout(opts && opts.aspect);
+    const W = evenDim(L.W), H = evenDim(L.H);
     const seconds = (opts && opts.seconds) || durationOf(d);
     const frames = Math.round(seconds * FPS);
-    canvas.width = L.W; canvas.height = L.H;
+    canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d', { willReadFrequently: false });
     const target = new ArrayBufferTarget();
     const muxer = new Muxer({
       target,
-      video: { codec: 'avc', width: L.W, height: L.H },
+      video: { codec: 'avc', width: W, height: H },
       fastStart: 'in-memory',
       firstTimestampBehavior: 'offset',
     });
@@ -410,9 +467,25 @@
       output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
       error: (e) => { encoderError = e; },
     });
-    const cfg = { codec: 'avc1.42001f', width: L.W, height: L.H, bitrate: 5_000_000, framerate: FPS, avc: { format: 'avc' } };
-    try { encoder.configure(cfg); }
-    catch { try { encoder.configure({ ...cfg, codec: 'avc1.4d001f' }); } catch { return null; } }
+    const codecs = ['avc1.640032', 'avc1.640028', 'avc1.4d002a', 'avc1.4d0028', 'avc1.420028', 'avc1.4d001f', 'avc1.42001f'];
+    let ok = false;
+    for (const codec of codecs) {
+      const cfg = { codec, width: W, height: H, bitrate: 5_000_000, framerate: FPS, avc: { format: 'avc' } };
+      try {
+        if (typeof VideoEncoder.isConfigSupported === 'function') {
+          const sup = await VideoEncoder.isConfigSupported(cfg).catch(() => null);
+          if (sup && sup.supported === false) continue;
+        }
+        encoder.configure(cfg);
+        ok = true;
+        break;
+      } catch { /* try next level */ }
+    }
+    if (!ok) { try { encoder.close(); } catch {} return null; }
+    // Warm the (just-resized) canvas so the first encoded frame is not black.
+    drawFrame(ctx, d, 0, opts);
+    if (typeof requestAnimationFrame === 'function') await new Promise((r) => requestAnimationFrame(r));
+    drawFrame(ctx, d, 0, opts);
     const video = opts && opts.bg && opts.bg.video;
     for (let i = 0; i < frames; i++) {
       const p = frames === 1 ? 1 : i / (frames - 1);
@@ -438,16 +511,29 @@
     }
     await encoder.flush();
     muxer.finalize();
+    try { encoder.close(); } catch {}
     return new Blob([target.buffer], { type: 'video/mp4' });
   }
 
-  async function recordWebm(canvas, d, opts, onProgress) {
+  async function recordCanvas(canvas, d, opts, onProgress) {
     if (typeof MediaRecorder === 'undefined' || !canvas.captureStream) return null;
     const L = layout(opts && opts.aspect);
+    const W = evenDim(L.W), H = evenDim(L.H);
     const seconds = (opts && opts.seconds) || durationOf(d);
-    canvas.width = L.W; canvas.height = L.H;
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    drawFrame(ctx, d, 0, opts);
     const stream = canvas.captureStream(FPS);
-    const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m));
+    const mime = [
+      'video/mp4;codecs=avc1.640028',
+      'video/mp4;codecs=avc1.4d0028',
+      'video/mp4;codecs=avc1.420028',
+      'video/mp4;codecs=avc1',
+      'video/mp4',
+      'video/webm;codecs=vp9',
+      'video/webm;codecs=vp8',
+      'video/webm',
+    ].find((m) => MediaRecorder.isTypeSupported(m));
     if (!mime) return null;
     const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5_000_000 });
     const chunks = [];
@@ -461,23 +547,22 @@
     return done;
   }
 
-  async function transcodeOnServer(webm) {
-    const r = await fetch('/api/replay/transcode', { method: 'POST', headers: { 'Content-Type': webm.type || 'video/webm' }, body: webm });
+  async function transcodeOnServer(blob) {
+    const r = await fetch('/api/replay/transcode', { method: 'POST', headers: { 'Content-Type': (blob && blob.type) || 'application/octet-stream' }, body: blob, credentials: 'same-origin' });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'transcode failed');
     return r.blob();
   }
 
   async function exportMp4(canvas, d, opts, onProgress) {
     await waitFont();
-    const wc = await encodeWebCodecs(canvas, d, opts, onProgress).catch(() => null);
-    if (wc && wc.size > 1000) return { blob: wc, mime: 'video/mp4', ext: 'mp4' };
-    const webm = await recordWebm(canvas, d, opts, onProgress);
-    if (webm && webm.size > 1000) {
+    let raw = await encodeWebCodecs(canvas, d, opts, onProgress).catch(() => null);
+    if (!(raw && raw.size > 1000)) raw = await recordCanvas(canvas, d, opts, onProgress).catch(() => null);
+    if (raw && raw.size > 1000) {
       try {
-        const mp4 = await transcodeOnServer(webm);
-        if (mp4 && mp4.size > 1000) return { blob: mp4, mime: 'video/mp4', ext: 'mp4' };
-      } catch { /* fall through */ }
-      return { blob: webm, mime: webm.type || 'video/webm', ext: 'webm' };
+        const mp4 = await transcodeOnServer(raw);
+        if (mp4 && mp4.size > 1000 && await blobLooksLikeMp4(mp4)) return { blob: mp4, mime: 'video/mp4', ext: 'mp4' };
+      } catch { /* fall through to a verified client MP4, never a WebM named .mp4 */ }
+      if (await blobLooksLikeMp4(raw)) return { blob: raw, mime: 'video/mp4', ext: 'mp4' };
     }
     // last resort: server render (default background only)
     const qs = new URLSearchParams();
@@ -492,9 +577,11 @@
     if (opts && opts.aspect) qs.set('aspect', opts.aspect === '9:16' || opts.aspect === 'portrait' ? '9:16' : '1:1');
     const hide = [d && d.hideProfit && 'profit', d && d.hideInvested && 'invested'].filter(Boolean).join(',');
     if (hide) qs.set('hide', hide);
-    const r = await fetch('/api/replay/render?' + qs);
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'render failed');
-    return { blob: await r.blob(), mime: 'video/mp4', ext: 'mp4' };
+    const r = await fetch('/api/replay/render?' + qs, { credentials: 'same-origin' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not encode a real H.264 MP4');
+    const blob = await r.blob();
+    if (!(await blobLooksLikeMp4(blob))) throw new Error('Could not encode a real H.264 MP4');
+    return { blob, mime: 'video/mp4', ext: 'mp4' };
   }
 
   function frameSvg(d, p, opts) {
@@ -504,28 +591,32 @@
     const T = ShareCard.THEMES[theme];
     const st = stateAt(d, p);
     const F = st.F;
-    const win = (st.pnlPct || 0) >= 0;
+    const win = signedPnl(st) >= 0;
     const accent = win ? T.green : T.red;
     const paper = !!(d && d.paper);
     const esc = ShareCard.esc;
     const pctStr = ShareCard.fmtPct(st.pnlPct);
-    const usdStr = F.hideProfit ? pctStr : (d && d.solUsd ? ShareCard.fmtUsd((st.pnlSol || 0) * (d.solUsd || 0)) : ShareCard.fmtSol(st.pnlSol));
+    const usdStr = F.hideProfit ? pctStr : (d && d.solUsd ? ShareCard.fmtUsd(st.pnlUsd != null ? st.pnlUsd : (st.pnlSol || 0) * (d.solUsd || 0)) : ShareCard.fmtSol(st.pnlSol));
     const solStr = F.hideProfit ? '' : ShareCard.fmtSol(st.pnlSol);
     const title = d && d.kind === 'account' ? ((d.label || 'ALL TIME') + (F.hideProfit ? ' RETURN' : ' PNL')) : ShareCard.tick(d && d.symbol);
     const badges = [];
     if (F.hideProfit || F.hideInvested) badges.push((F.hideProfit && F.hideInvested) ? 'HIDDEN' : (F.hideProfit ? 'P&L HIDDEN' : 'SIZE HIDDEN'));
     if (d && d.kind !== 'account' && d.status === 'open') badges.push('OPEN');
+    if (d && d.kind === 'account' && d.label) badges.push(d.label);
     badges.push(paper ? 'PAPER' : 'LIVE');
     const badgeXml = badges.map((t, i) => {
       const w = 28 + t.length * 12;
       const x = L.W - 48 - (i + 1) * (w + 12);
-      return `<rect x="${x}" y="48" width="${w}" height="40" rx="20" fill="${i === 0 && t !== 'PAPER' && t !== 'LIVE' ? T.panel : (t === 'LIVE' ? T.liveBg : t === 'PAPER' ? T.paperBg : T.panel)}"/>
-        <text x="${x + w / 2}" y="75" text-anchor="middle" font-size="18" font-weight="800" fill="${t === 'LIVE' ? T.liveFg : t === 'PAPER' ? T.paperFg : T.mut}">${esc(t)}</text>`;
+      const bg = t === 'LIVE' ? T.liveBg : t === 'PAPER' ? T.paperBg : t === 'OPEN' ? T.openBg : T.panel;
+      const fg = t === 'LIVE' ? T.liveFg : t === 'PAPER' ? T.paperFg : t === 'OPEN' ? T.openFg : T.text;
+      return `<rect x="${x}" y="48" width="${w}" height="40" rx="20" fill="${bg}"/>
+        <text x="${x + w / 2}" y="75" text-anchor="middle" font-size="18" font-weight="800" fill="${fg}">${esc(t)}</text>`;
     }).join('');
     let chart = '';
     const pts = d && d.kind === 'account'
       ? (st.shown || []).map((c) => ({ t: c.t, y: c[st.key] != null ? c[st.key] : 0 }))
       : (st.ticks || []).filter((x) => x.t <= st.tNow || x.t <= st.tBuy).map((x) => ({ t: x.t, y: x.price }));
+    if (pts.length === 1) pts.push({ t: pts[0].t + 1, y: pts[0].y });
     if (pts.length >= 2) {
       const ys = pts.map((p) => p.y);
       const min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
@@ -559,7 +650,7 @@
   <text x="${L.pad}" y="${L.pnlY}" font-family="Inter" font-size="92" font-weight="900" fill="${accent}">${esc(usdStr)}</text>
   <text x="${L.pad}" y="${L.solY}" font-family="Inter" font-size="28" font-weight="700" fill="${T.mut}">${esc(solStr)}${!F.hideProfit && solStr ? '   ' + esc(pctStr) : ''}</text>
   ${chart}${peak}
-  <text x="${L.pad}" y="${L.footY}" font-family="Inter" font-size="20" font-weight="600" fill="${T.dim}">devameer-bot</text>
+  <text x="${L.pad}" y="${L.footY}" font-family="Inter" font-size="20" font-weight="600" fill="${T.dim}">${esc(d && d.kind === 'account' ? ((st.trades || 0) + ' trades · ' + (st.trades ? Math.round((st.winRate || 0) * 100) + '% win' : 'no trades yet')) : [d && d.holdMs != null ? 'held ' + ShareCard.fmtHold(d.holdMs) : '', d && d.exitReason, 'devameer-bot'].filter(Boolean).join('  ·  '))}</text>
   <text x="${L.W - L.pad}" y="${L.footY}" text-anchor="end" font-family="Inter" font-size="18" font-weight="600" fill="${T.dim}">${HANDLE}</text>
 </svg>`;
   }

@@ -163,14 +163,17 @@ app.post('/api/flow/transcode', requireSession, express.raw({ type: () => true, 
   if (buf.length > 150 * 1024 * 1024) return res.status(400).json({ error: 'Video must be 150 MB or smaller' });
   xcodeBusy = true;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'devameer-flow-xcode-'));
-  const inn = path.join(tmp, 'in.webm');
+  const inn = path.join(tmp, 'in.bin');
   const out = path.join(tmp, 'out.mp4');
   try {
     fs.writeFileSync(inn, buf);
     await new Promise((resolve, reject) => {
       const ff = spawn(ffmpegBin(), [
         '-y', '-hide_banner', '-loglevel', 'error', '-i', inn,
-        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-crf', '23',
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=30',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', '30',
+        '-preset', 'ultrafast', '-crf', '23',
+        '-profile:v', 'high', '-level', '4.1',
         '-threads', '0', '-an', '-movflags', '+faststart', out,
       ]);
       let err = '';
