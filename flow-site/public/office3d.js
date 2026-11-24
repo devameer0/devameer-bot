@@ -3313,6 +3313,24 @@ window.DevameerOffice = {
   toggleTour, setTour, isTour: () => tourOn,
   cycleFx, applyFxLevel, onDoubleClick,
   cycleRoof, setRoofMode, toggleSpin, setSpin,
+  walkToAgent, setWalkDest, exitInspect,
+  setView(pos, target, instant) {
+    if (!camera || !controls) return false;
+    const p = new THREE.Vector3(pos[0], pos[1], pos[2]);
+    const g = new THREE.Vector3(target[0], target[1], target[2]);
+    if (instant === false) startFly(p, g, 0.8);
+    else { camera.position.copy(p); controls.target.copy(g); controls.update(); fly = null; }
+    return true;
+  },
+  inspectByLabel(label) {
+    if (!hqRoot) return false;
+    let found = null;
+    hqRoot.traverse((o) => { if (!found && o.isMesh && o.userData && o.userData.pickLabel === label) found = o; });
+    if (!found) {
+      for (const d of desks.values()) d.root.traverse((o) => { if (!found && o.isMesh && o.userData && o.userData.pickLabel === label) found = o; });
+    }
+    return found ? flyToObject(found) : false;
+  },
   audioGains: () => ({ ...AUDIO_GAINS, master: audio.volume, muted: audio.muted, enabled: audio.enabled }),
 };
 
