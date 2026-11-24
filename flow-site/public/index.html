@@ -50,16 +50,13 @@
       <button type="button" class="tod-btn" data-tod="night">Night</button>
     </div>
     <button type="button" class="view-btn hidden" id="roofToggle" aria-label="Roof visibility: on" aria-pressed="true">Roof on</button>
-    <button type="button" class="view-btn hidden" id="spinToggle" aria-label="Auto-rotate camera">Spin</button>
     <button type="button" class="view-btn hidden" id="inspectBack" aria-label="Back from close-up">Back</button>
     <button type="button" class="view-btn hidden" id="camOverview" aria-label="Return to overview">Overview</button>
-    <label class="jump-wrap hidden" id="jumpWrap">
-      <span>Jump</span>
-      <select id="agentJump" aria-label="Jump to agent">
-        <option value="">Agent…</option>
-      </select>
-    </label>
-    <button type="button" class="view-btn hidden" id="walkToggle" aria-label="Enter walk mode">Walk</button>
+    <div class="office-dock hidden" id="officeDock">
+      <button type="button" class="view-btn" id="officeListBtn" aria-label="Open offices list" aria-expanded="false" aria-controls="officePanel">Offices</button>
+      <div class="office-panel hidden" id="officePanel" role="menu" aria-label="Offices"></div>
+      <select id="agentJump" class="hidden" aria-hidden="true" tabindex="-1"><option value="">Office…</option></select>
+    </div>
     <button type="button" class="view-btn hidden" id="tourToggle" aria-label="Start cinematic tour">Tour</button>
     <button type="button" class="view-btn hidden" id="fxToggle" aria-label="Toggle cinematic FX">FX High</button>
   </header>
@@ -111,7 +108,7 @@
     <canvas id="cv"></canvas>
     <canvas id="cv3d" class="hidden" aria-label="3D office"></canvas>
   </div>
-  <div class="cam-hint hidden" id="camHint">click an object to inspect · drag to orbit 360° · pinch/scroll to zoom · Walk: tap a spot to go there, drag to look · Esc/Back to return</div>
+  <div class="cam-hint hidden" id="camHint">drag to pan the city · pinch or scroll to zoom · tap an object to close in · tap empty to ease back</div>
   <div class="sound-dock" id="soundDock">
     <button type="button" class="sound-speaker" id="audioMute" aria-label="Mute office sound">
       <span class="spk" aria-hidden="true">🔊</span>

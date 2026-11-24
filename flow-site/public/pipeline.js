@@ -1308,11 +1308,7 @@
         if (window.DevameerOffice && window.DevameerOffice.unlockAudio) window.DevameerOffice.unlockAudio(true);
       });
     }
-    const walkBtn = $('#walkToggle');
-    if (walkBtn && !walkBtn._bound) {
-      walkBtn._bound = true;
-      walkBtn.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.toggleWalk) window.DevameerOffice.toggleWalk(); });
-    }
+
     const tourBtn = $('#tourToggle');
     if (tourBtn && !tourBtn._bound) {
       tourBtn._bound = true;
@@ -1488,9 +1484,11 @@
       btn.setAttribute('aria-label', is3d ? 'Switch to 2D cards' : 'Switch to 3D office');
     }
     if (hint) hint.classList.toggle('hidden', state.viewMode !== '3d');
+    const officeDock = $('#officeDock');
+    if (officeDock) officeDock.classList.toggle('hidden', state.viewMode !== '3d');
     const jumpWrap = $('#jumpWrap');
     if (jumpWrap) jumpWrap.classList.toggle('hidden', state.viewMode !== '3d');
-    ['walkToggle', 'tourToggle', 'fxToggle', 'roofToggle', 'spinToggle'].forEach((id) => {
+    ['tourToggle', 'fxToggle', 'roofToggle'].forEach((id) => {
       const el = $('#' + id);
       if (el) el.classList.toggle('hidden', state.viewMode !== '3d');
     });
