@@ -68,9 +68,10 @@
       try { return localStorage.getItem('devameer-flow-view') === '2d' ? '2d' : '3d'; }
       catch { return '3d'; }
     })(),
-    theme: (function () {
-      try { return localStorage.getItem('devameer-flow-theme') === 'light' ? 'light' : 'dark'; }
-      catch { return 'dark'; }
+    theme: 'light',
+    tod: (function () {
+      try { return localStorage.getItem('devameer-flow-tod') || 'auto'; }
+      catch { return 'auto'; }
     })(),
     worldListeners: [],
   };
@@ -1246,10 +1247,27 @@
       viewBtn._bound = true;
       viewBtn.addEventListener('click', () => setViewMode(state.viewMode === '3d' ? '2d' : '3d'));
     }
-    const themeBtn = $('#themeToggle');
-    if (themeBtn && !themeBtn._bound) {
-      themeBtn._bound = true;
-      themeBtn.addEventListener('click', () => setTheme(state.theme === 'light' ? 'dark' : 'light'));
+    const todDock = $('#todDock');
+    if (todDock && !todDock._bound) {
+      todDock._bound = true;
+      todDock.querySelectorAll('[data-tod]').forEach((btn) => {
+        btn.addEventListener('click', () => applyTod(btn.getAttribute('data-tod')));
+      });
+    }
+    const roofBtn = $('#roofToggle');
+    if (roofBtn && !roofBtn._bound) {
+      roofBtn._bound = true;
+      roofBtn.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.cycleRoof) window.DevameerOffice.cycleRoof(); });
+    }
+    const spinBtn = $('#spinToggle');
+    if (spinBtn && !spinBtn._bound) {
+      spinBtn._bound = true;
+      spinBtn.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.toggleSpin) window.DevameerOffice.toggleSpin(); });
+    }
+    const backBtn = $('#inspectBack');
+    if (backBtn && !backBtn._bound) {
+      backBtn._bound = true;
+      backBtn.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.exitInspect) window.DevameerOffice.exitInspect(); });
     }
     const ov = $('#camOverview');
     if (ov && !ov._bound) {
@@ -1313,6 +1331,7 @@
     }
     updateViewToggle();
     updateThemeToggle();
+    applyTod(state.tod || 'auto', true);
   }
   function zoomAt(cx, cy, k) {
     const wrap = $('#wrap').getBoundingClientRect();
@@ -1453,6 +1472,7 @@
       stats: state.stats,
       lastEv: state.lastEv,
       status: state.status,
+      pnl: state.pnl,
       pulse: state.pulse,
       heat: state.heat,
       configs: state.configs,
@@ -1476,10 +1496,12 @@
     if (hint) hint.classList.toggle('hidden', state.viewMode !== '3d');
     const jumpWrap = $('#jumpWrap');
     if (jumpWrap) jumpWrap.classList.toggle('hidden', state.viewMode !== '3d');
-    ['walkToggle', 'tourToggle', 'fxToggle'].forEach((id) => {
+    ['walkToggle', 'tourToggle', 'fxToggle', 'roofToggle', 'spinToggle'].forEach((id) => {
       const el = $('#' + id);
       if (el) el.classList.toggle('hidden', state.viewMode !== '3d');
     });
+    const todDock = $('#todDock');
+    if (todDock) todDock.classList.toggle('hidden', state.viewMode !== '3d');
   }
 
   function setViewMode(mode) {
@@ -1516,29 +1538,47 @@
     }
   }
 
-  function updateThemeToggle() {
-    const btn = $('#themeToggle');
-    if (btn) {
-      const light = state.theme === 'light';
-      btn.textContent = light ? 'Dark' : 'Light';
-      btn.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
-    }
+  function lagosHour() {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', hour: '2-digit', hour12: false }).formatToParts(new Date());
+      return +((parts.find((p) => p.type === 'hour') || {}).value || 12);
+    } catch { return new Date().getHours(); }
   }
-
+  function resolveTod(choice) {
+    if (choice === 'morning' || choice === 'afternoon' || choice === 'night') return choice;
+    const h = lagosHour();
+    if (h >= 5 && h < 12) return 'morning';
+    if (h >= 12 && h < 18) return 'afternoon';
+    return 'night';
+  }
+  function updateThemeToggle() { updateTodUi(); }
+  function updateTodUi() {
+    const mode = resolveTod(state.tod || 'auto');
+    document.querySelectorAll('#todDock [data-tod]').forEach((btn) => {
+      const on = btn.getAttribute('data-tod') === (state.tod || 'auto');
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.classList.toggle('on', on);
+    });
+  }
   function applyTheme(mode) {
     const next = mode === 'light' ? 'light' : 'dark';
     state.theme = next;
     document.documentElement.setAttribute('data-theme', next);
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', next === 'light' ? '#E8EEF6' : '#0B0B0D');
-    try { localStorage.setItem('devameer-flow-theme', next); } catch {}
-    updateThemeToggle();
-    if (window.DevameerOffice && window.DevameerOffice.setTheme) {
-      try { window.DevameerOffice.setTheme(next); } catch (e) { console.warn(e); }
+    updateTodUi();
+  }
+  function applyTod(choice, instant) {
+    state.tod = choice || 'auto';
+    try { localStorage.setItem('devameer-flow-tod', state.tod); } catch {}
+    const mode = resolveTod(state.tod);
+    applyTheme(mode === 'night' ? 'dark' : 'light');
+    if (window.DevameerOffice && window.DevameerOffice.setTod) {
+      try { window.DevameerOffice.setTod(state.tod, instant); } catch (e) { console.warn(e); }
     }
   }
-
-  function setTheme(mode) { applyTheme(mode); }
+  function setTheme(mode) { applyTod(mode === 'dark' ? 'night' : 'afternoon'); }
+  function setTod(choice) { applyTod(choice); }
 
   function snapWorld() {
     return {
@@ -1634,7 +1674,7 @@
     open, close, resize, fit: () => goFit(false), setStatus,
     aspectSize, ensureRecCanvas, drawCapture, endCapture, stepWorld,
     onEvent, seedSilent, clearMotion, snapWorld, restoreWorld, playEvents,
-    clock, world, agentModeOf, setViewMode, applyPreferredView, setTheme, applyTheme, pushScreenLine,
+    clock, world, agentModeOf, setViewMode, applyPreferredView, setTheme, applyTheme, setTod, applyTod, pushScreenLine,
     onWorldEvent(fn) { if (typeof fn === 'function') state.worldListeners.push(fn); },
     get viewMode() { return state.viewMode; },
     get theme() { return state.theme; },

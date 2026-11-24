@@ -42,7 +42,15 @@
     <span class="mode-pill paper" id="modePill">PAPER</span>
     <span class="cap-pill hidden" id="capPill">DAILY CAP</span>
     <button type="button" class="view-btn" id="viewToggle" aria-label="Switch to 2D cards">2D cards</button>
-    <button type="button" class="view-btn" id="themeToggle" aria-label="Switch to light mode">Light</button>
+    <div class="tod-dock hidden" id="todDock" role="group" aria-label="Time of day">
+      <button type="button" class="tod-btn" data-tod="auto">Auto</button>
+      <button type="button" class="tod-btn" data-tod="morning">Morning</button>
+      <button type="button" class="tod-btn" data-tod="afternoon">Afternoon</button>
+      <button type="button" class="tod-btn" data-tod="night">Night</button>
+    </div>
+    <button type="button" class="view-btn hidden" id="roofToggle" aria-label="Toggle roof">Roof auto</button>
+    <button type="button" class="view-btn hidden" id="spinToggle" aria-label="Auto-rotate camera">Spin</button>
+    <button type="button" class="view-btn hidden" id="inspectBack" aria-label="Back from close-up">Back</button>
     <button type="button" class="view-btn hidden" id="camOverview" aria-label="Return to overview">Overview</button>
     <label class="jump-wrap hidden" id="jumpWrap">
       <span>Jump</span>
@@ -102,7 +110,7 @@
     <canvas id="cv"></canvas>
     <canvas id="cv3d" class="hidden" aria-label="3D office"></canvas>
   </div>
-  <div class="cam-hint hidden" id="camHint">drag to orbit · scroll to zoom · click an agent to fly in · double-click to go there · Esc for overview</div>
+  <div class="cam-hint hidden" id="camHint">click an object to inspect · drag to orbit 360° · pinch/scroll to zoom · Walk: tap a spot to go there, drag to look · Esc/Back to return</div>
   <div class="sound-dock" id="soundDock">
     <button type="button" class="sound-speaker" id="audioMute" aria-label="Mute office sound">
       <span class="spk" aria-hidden="true">🔊</span>
@@ -119,16 +127,6 @@
       <strong>Tap to enable sound</strong>
       <em>Office typing, handoffs, and room tone</em>
     </button>
-  </div>
-  <div class="walk-ui hidden" id="walkUi" aria-hidden="true">
-    <div class="joy" id="joy">
-      <div class="joy-knob" id="joyKnob"></div>
-    </div>
-    <div class="walk-vert">
-      <button type="button" id="walkUp" aria-label="Fly up">Q ↑</button>
-      <button type="button" id="walkDown" aria-label="Fly down">E ↓</button>
-    </div>
-    <div class="walk-hint">WASD / arrows to walk · mouse to look · Q/E up/down · Esc to exit</div>
   </div>
   <div id="tip" class="tip hidden"></div>
 </section>

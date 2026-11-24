@@ -140,3 +140,11 @@ html[data-theme="light"] .sound-enable em{color:#64748B}
 html[data-theme="light"] .joy{background:rgba(248,250,252,.7);border-color:#D5DEE8}
 html[data-theme="light"] .walk-vert button{background:rgba(248,250,252,.9);border-color:#D5DEE8;color:#0F172A}
 html[data-theme="light"] .walk-hint{color:#475569;text-shadow:0 1px 6px #fff}
+
+.tod-dock{display:flex;gap:2px;align-items:center;background:rgba(12,14,20,.72);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:2px;backdrop-filter:blur(10px)}
+.tod-btn{border:0;background:transparent;color:#E4E4E7;font:650 11px/1 Inter,system-ui,sans-serif;padding:7px 9px;border-radius:8px;cursor:pointer}
+.tod-btn[aria-pressed="true"],.tod-btn.on{background:#FAFAFA;color:#0F172A}
+html[data-theme="light"] .tod-dock{background:rgba(248,250,252,.86);border-color:#D5DEE8}
+html[data-theme="light"] .tod-btn{color:#334155}
+html[data-theme="light"] .tod-btn[aria-pressed="true"],html[data-theme="light"] .tod-btn.on{background:#0F172A;color:#F8FAFC}
+@media (max-width:720px){.tod-btn{padding:6px 6px;font-size:10px}}
