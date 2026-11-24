@@ -9,6 +9,17 @@ const { spawn } = require('child_process');
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
+const zlib = require('zlib');
+
+let bundled = null;
+const bundleReady = require('./build-bundle').build().then((b) => {
+  bundled = b;
+  console.log('HQ assets bundled', b.stamp);
+  return b;
+}).catch((e) => {
+  console.warn('asset bundle skipped:', e && e.message ? e.message : e);
+  return null;
+});
 
 const PORT = +process.env.PORT || 4001;
 const BOT_URL = (process.env.BOT_URL || 'https://devameer-bot.onrender.com').replace(/\/$/, '');
@@ -58,6 +69,47 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '8kb' }));
 app.use(cookieParser());
+
+const COMPRESS_RE = /javascript|json|text\/|css|svg|xml|wasm|font|module/;
+app.use((req, res, next) => {
+  if (req.path === '/api/flow/stream' || req.path === '/api/flow/transcode') return next();
+  const ae = req.headers['accept-encoding'] || '';
+  if (!ae.includes('gzip')) return next();
+  const _write = res.write;
+  const _end = res.end;
+  const chunks = [];
+  let ended = false;
+  res.write = function (chunk, enc, cb) {
+    if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, enc));
+    if (typeof enc === 'function') enc();
+    else if (cb) cb();
+    return true;
+  };
+  res.end = function (chunk, enc, cb) {
+    if (ended) return res;
+    ended = true;
+    if (chunk) res.write(chunk, typeof enc === 'string' ? enc : undefined);
+    const raw = chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0);
+    const ct = String(res.getHeader('Content-Type') || '');
+    const already = res.getHeader('Content-Encoding');
+    if (already || !COMPRESS_RE.test(ct) || raw.length < 512) {
+      res.write = _write; res.end = _end;
+      return _end.call(res, raw, undefined, typeof enc === 'function' ? enc : cb);
+    }
+    try {
+      const gz = zlib.gzipSync(raw, { level: 6 });
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.setHeader('Content-Length', gz.length);
+      res.write = _write; res.end = _end;
+      return _end.call(res, gz, undefined, typeof enc === 'function' ? enc : cb);
+    } catch (e) {
+      res.write = _write; res.end = _end;
+      return _end.call(res, raw, undefined, typeof enc === 'function' ? enc : cb);
+    }
+  };
+  next();
+});
 
 const requireSession = (req, res, next) => verify(req.cookies.sid) ? next() : res.status(401).json({ error: 'login required' });
 
@@ -221,11 +273,61 @@ app.get('/vendor/mp4-muxer.mjs', (req, res) => {
 
 const pub = path.join(__dirname, 'public');
 const threeDir = path.join(__dirname, 'node_modules', 'three');
-if (fs.existsSync(threeDir)) {
-  app.use('/vendor/three', express.static(threeDir, { maxAge: '7d' }));
-}
-app.use(express.static(pub, { extensions: ['html'] }));
 
-app.listen(PORT, () => console.log(`Devameer Bot Pipeline on :${PORT} · bot ${BOT_URL}`));
+const ASSET_MAP = {
+  '/office3d.bundle.js': () => bundled && bundled.files['/office3d.bundle.js'],
+  '/pipeline.js': () => bundled && bundled.files['/pipeline.js'],
+  '/pipeline.css': () => bundled && bundled.files['/pipeline.css'],
+  '/record.js': () => bundled && bundled.files['/record.js'],
+  '/site.js': () => bundled && bundled.files['/site.js'],
+};
+function sendAsset(req, res, filePath, type) {
+  if (!filePath || !fs.existsSync(filePath)) return false;
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  if (type) res.type(type);
+  res.sendFile(path.resolve(filePath));
+  return true;
+}
+app.get('/office3d.bundle.js', (req, res, next) => {
+  if (sendAsset(req, res, ASSET_MAP['/office3d.bundle.js'](), 'application/javascript')) return;
+  if (sendAsset(req, res, path.join(pub, 'office3d.js'), 'application/javascript')) return;
+  next();
+});
+['/pipeline.js', '/record.js', '/site.js', '/pipeline.css'].forEach((route) => {
+  app.get(route, (req, res, next) => {
+    const type = route.endsWith('.css') ? 'text/css' : 'application/javascript';
+    if (sendAsset(req, res, ASSET_MAP[route] && ASSET_MAP[route](), type)) return;
+    next();
+  });
+});
+
+function serveIndex(req, res) {
+  let html = fs.readFileSync(path.join(pub, 'index.html'), 'utf8');
+  const v = (bundled && bundled.stamp) || String(Date.now());
+  html = html.replace(/(href|src)="(\/(?:pipeline\.(?:css|js)|record\.js|site\.js|office3d\.bundle\.js))"/g, '$1="$2?v=' + v + '"');
+  html = html.replace(/href="\/office3d\.bundle\.js"/g, 'href="/office3d.bundle.js?v=' + v + '"');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.type('html').send(html);
+}
+app.get('/', serveIndex);
+app.get('/index.html', serveIndex);
+
+if (fs.existsSync(threeDir)) {
+  app.use('/vendor/three', express.static(threeDir, { maxAge: '7d', setHeaders(res) {
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+  }}));
+}
+app.use(express.static(pub, {
+  extensions: ['html'],
+  setHeaders(res, filePath) {
+    if (/index\.html$/i.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+    else if (/\.(?:js|mjs|css)$/i.test(filePath)) res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+    else if (/\.(?:png|jpg|jpeg|webp|svg|woff2?)$/i.test(filePath)) res.setHeader('Cache-Control', 'public, max-age=86400');
+  },
+}));
+
+bundleReady.finally(() => {
+  app.listen(PORT, () => console.log(`Devameer Bot Pipeline on :${PORT} · bot ${BOT_URL}`));
+});
 
 if (KEEP_AWAKE && PUBLIC_URL) setInterval(() => fetch(PUBLIC_URL + '/healthz').catch(() => {}), 10 * 60000);

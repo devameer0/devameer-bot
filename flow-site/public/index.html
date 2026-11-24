@@ -15,6 +15,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/pipeline.css">
+<link rel="modulepreload" href="/office3d.bundle.js">
 <script type="importmap">
 {"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}
 </script>
@@ -48,7 +49,7 @@
       <button type="button" class="tod-btn" data-tod="afternoon">Afternoon</button>
       <button type="button" class="tod-btn" data-tod="night">Night</button>
     </div>
-    <button type="button" class="view-btn hidden" id="roofToggle" aria-label="Toggle roof">Roof auto</button>
+    <button type="button" class="view-btn hidden" id="roofToggle" aria-label="Roof visibility: on" aria-pressed="true">Roof on</button>
     <button type="button" class="view-btn hidden" id="spinToggle" aria-label="Auto-rotate camera">Spin</button>
     <button type="button" class="view-btn hidden" id="inspectBack" aria-label="Back from close-up">Back</button>
     <button type="button" class="view-btn hidden" id="camOverview" aria-label="Return to overview">Overview</button>
@@ -121,6 +122,13 @@
       <span id="audioPct" class="sound-pct">90%</span>
     </div>
   </div>
+  <div class="boot-gate hidden" id="bootGate" aria-live="polite">
+    <div class="boot-card">
+      <strong>Loading Devameer Bot HQ</strong>
+      <div class="boot-bar" aria-hidden="true"><i id="bootBar"></i></div>
+      <em id="bootMsg">Starting…</em>
+    </div>
+  </div>
   <div class="sound-gate" id="soundGate">
     <button type="button" id="soundEnable" class="sound-enable">
       <span class="spk big" aria-hidden="true">🔊</span>
@@ -133,6 +141,6 @@
 <script src="/pipeline.js"></script>
 <script src="/record.js"></script>
 <script src="/site.js"></script>
-<script type="module" src="/office3d.js"></script>
+<script type="module" src="/office3d.bundle.js"></script>
 </body>
 </html>

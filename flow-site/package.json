@@ -5,10 +5,12 @@
   "description": "Standalone Devameer Bot Pipeline (read-only live view)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "node build-bundle.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",
+    "esbuild": "^0.25.0",
     "express": "^5.3.0",
     "ffmpeg-static": "^5.2.0",
     "three": "^0.170.0"

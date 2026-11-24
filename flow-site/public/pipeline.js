@@ -1247,13 +1247,7 @@
       viewBtn._bound = true;
       viewBtn.addEventListener('click', () => setViewMode(state.viewMode === '3d' ? '2d' : '3d'));
     }
-    const todDock = $('#todDock');
-    if (todDock && !todDock._bound) {
-      todDock._bound = true;
-      todDock.querySelectorAll('[data-tod]').forEach((btn) => {
-        btn.addEventListener('click', () => applyTod(btn.getAttribute('data-tod')));
-      });
-    }
+    bindTodControls();
     const roofBtn = $('#roofToggle');
     if (roofBtn && !roofBtn._bound) {
       roofBtn._bound = true;
@@ -1400,7 +1394,7 @@
 
   async function open() {
     state.open = true;
-    applyTheme(state.theme || 'dark');
+    applyTod(state.tod || 'auto', true);
     bind();
     resize();
     const ok = await load();
@@ -1502,13 +1496,16 @@
     });
     const todDock = $('#todDock');
     if (todDock) todDock.classList.toggle('hidden', state.viewMode !== '3d');
+    const boot = $('#bootGate');
+    if (boot && state.viewMode !== '3d') boot.classList.add('hidden');
   }
 
   function setViewMode(mode) {
     const want = mode === '2d' ? '2d' : '3d';
     if (want === '3d') {
       const Office = window.DevameerOffice;
-      if (!Office) { updateViewToggle(); return false; }
+      if (!Office) { setBoot(8, 'Loading 3D engine…'); updateViewToggle(); return false; }
+      setBoot(10, 'Opening HQ…');
       if (!Office.setActive(true)) {
         // Temporary (world not loaded yet). Only give up if WebGL itself is missing.
         if (typeof Office.supported === 'function' && !Office.supported()) {
@@ -1531,6 +1528,7 @@
   function applyPreferredView() {
     const want = state.viewMode || '3d';
     if (want === '3d') {
+      setBoot(2, 'Loading Devameer Bot HQ…');
       if (window.DevameerOffice) setViewMode('3d');
       else updateViewToggle();
     } else {
@@ -1568,13 +1566,44 @@
     if (meta) meta.setAttribute('content', next === 'light' ? '#E8EEF6' : '#0B0B0D');
     updateTodUi();
   }
+  function setBoot(pct, msg, done) {
+    const gate = $('#bootGate');
+    const bar = $('#bootBar');
+    const label = $('#bootMsg');
+    if (label && msg) label.textContent = msg;
+    if (bar) bar.style.width = Math.max(0, Math.min(100, +pct || 0)) + '%';
+    if (!gate) return;
+    if (done) gate.classList.add('hidden');
+    else gate.classList.remove('hidden');
+  }
+  function bindTodControls() {
+    const dock = $('#todDock');
+    const pick = (e) => {
+      const btn = e.target && e.target.closest && e.target.closest('#todDock [data-tod]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      applyTod(btn.getAttribute('data-tod'), true);
+    };
+    if (dock && !dock._bound) {
+      dock._bound = true;
+      dock.addEventListener('pointerdown', pick, true);
+      dock.addEventListener('click', pick, true);
+    }
+    if (!document._todDelegated) {
+      document._todDelegated = true;
+      document.addEventListener('pointerdown', pick, true);
+    }
+  }
   function applyTod(choice, instant) {
-    state.tod = choice || 'auto';
+    const next = choice || 'auto';
+    state.tod = next;
     try { localStorage.setItem('devameer-flow-tod', state.tod); } catch {}
     const mode = resolveTod(state.tod);
     applyTheme(mode === 'night' ? 'dark' : 'light');
+    updateTodUi();
     if (window.DevameerOffice && window.DevameerOffice.setTod) {
-      try { window.DevameerOffice.setTod(state.tod, instant); } catch (e) { console.warn(e); }
+      try { window.DevameerOffice.setTod(state.tod, instant === undefined ? true : instant); } catch (e) { console.warn(e); }
     }
   }
   function setTheme(mode) { applyTod(mode === 'dark' ? 'night' : 'afternoon'); }
@@ -1678,6 +1707,8 @@
     onWorldEvent(fn) { if (typeof fn === 'function') state.worldListeners.push(fn); },
     get viewMode() { return state.viewMode; },
     get theme() { return state.theme; },
+    get tod() { return state.tod; },
+    setBoot,
     get holdLive() { return state.holdLive; },
     set holdLive(v) { state.holdLive = !!v; },
     get freezeWorld() { return state.freezeWorld; },

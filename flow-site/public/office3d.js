@@ -1,7 +1,6 @@
 /* Devameer Bot Pipeline — 3D virtual office. Cute chibi agents at desks, driven only by real SSE events. */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -84,6 +83,54 @@ const _col = new THREE.Color();
 
 function isMob() {
   return Math.min(window.innerWidth, window.innerHeight) < 720 || 'ontouchstart' in window;
+}
+function isWeak() {
+  try {
+    const cores = navigator.hardwareConcurrency || 8;
+    const mem = navigator.deviceMemory || 8;
+    return isMob() || cores <= 4 || mem <= 4;
+  } catch { return isMob(); }
+}
+let pixelRatioCap = 1.5;
+let autoTier = 0;
+let userFx = 'high';
+let pendingInteriors = [];
+let cablesWired = false;
+let loadDone = false;
+
+function desiredPixelRatio() {
+  const dpr = window.devicePixelRatio || 1;
+  let cap = Math.min(1.5, pixelRatioCap);
+  if (isMob() || isWeak()) cap = Math.min(cap, 1.15);
+  if (autoTier >= 1) cap = Math.min(cap, 1);
+  if (autoTier >= 3) cap = Math.min(cap, 0.85);
+  return Math.max(0.75, Math.min(cap, dpr));
+}
+function applyPixelRatio() {
+  if (!renderer) return;
+  const pr = desiredPixelRatio();
+  if (Math.abs((renderer.getPixelRatio ? renderer.getPixelRatio() : 0) - pr) > 0.04) {
+    renderer.setPixelRatio(pr);
+    const wrap = document.getElementById('wrap');
+    if (wrap) {
+      const r = wrap.getBoundingClientRect();
+      renderer.setSize(Math.max(1, Math.floor(r.width)), Math.max(1, Math.floor(r.height)), false);
+    }
+    resizeFx();
+  }
+}
+function setLoadProgress(pct, msg, done) {
+  const gate = document.getElementById('bootGate');
+  const bar = document.getElementById('bootBar');
+  const label = document.getElementById('bootMsg');
+  if (label && msg) label.textContent = msg;
+  if (bar) bar.style.width = Math.max(0, Math.min(100, +pct || 0)) + '%';
+  if (window.DevameerPipeline && typeof window.DevameerPipeline.setBoot === 'function') {
+    try { window.DevameerPipeline.setBoot(pct, msg, !!done); } catch {}
+  }
+  if (!gate) return;
+  if (done) { loadDone = true; gate.classList.add('hidden'); }
+  else { loadDone = false; gate.classList.remove('hidden'); }
 }
 
 function hasWebGL() {
@@ -572,7 +619,7 @@ let hqSign = null;
 let wallScreen = null;
 let wallScreenTex = null;
 let wallScreenCtx = null;
-let roofForced = 'auto'; // auto | on | off
+let roofForced = 'on'; // on | off — never auto-hide
 let spinOn = false;
 let todChoice = 'auto';
 let todMode = 'afternoon';
@@ -893,6 +940,17 @@ function furnishOffice(spec, node, buckets) {
   wallPieces(trim, x0 + 0.05, x1 - 0.05, z0 + 0.02, z0 + 0.045, 0.03, 0.05);
   wallPieces(trim, x0 + 0.05, x1 - 0.05, z1 - 0.045, z1 - 0.02, 0.03, 0.05);
 
+  pendingInteriors.push({ spec, node, color });
+  rooms.set(spec.id, { ...spec, color, node, far: false, interior: null, furnished: false });
+  return null;
+}
+
+function furnishOfficeInterior(spec, node) {
+  if (!spec || !node || desks.has(node.id)) return null;
+  const { cx, cz, door, w, d } = spec;
+  const color = node.color || '#3B82F6';
+  const x0 = cx - w / 2, x1 = cx + w / 2, z0 = cz - d / 2, z1 = cz + d / 2;
+
   const interior = new THREE.Group();
   interior.name = 'interior-' + spec.id;
 
@@ -978,8 +1036,16 @@ function furnishOffice(spec, node, buckets) {
   doorList.push({ mesh: pivot, x: hingeX, z: hingeZ, closedAng: closed, openAng });
 
   hqRoot.add(interior);
-  rooms.set(spec.id, { ...spec, color, interior, node, far: false });
+  const room = rooms.get(spec.id);
+  if (room) { room.interior = interior; room.furnished = true; }
+  else rooms.set(spec.id, { ...spec, color, interior, node, far: false, furnished: true });
   desks.set(node.id, dsk);
+  if (dsk.lampLight) {
+    const P = TOD[todMode] || TOD.afternoon;
+    const lampsOn = (P.lamp || 0) > 0.02 && fxLevel !== 'off' && autoTier < 2;
+    dsk.lampLight.visible = lampsOn;
+    dsk.lampLight.intensity = lampsOn ? (0.15 + P.lamp * 0.7) : 0;
+  }
   return dsk;
 }
 
@@ -1179,32 +1245,34 @@ function buildRoof(bx0, bx1, bz0, bz1) {
   if (!roofGroup.parent) hqRoot.add(roofGroup);
 }
 
+function inBuilding(x, z) {
+  return x > -11 && x < 11 && z > -11 && z < 11.5;
+}
+function clampUnderRoof(pos) {
+  if (!pos || roofForced === 'off') return pos;
+  if (inBuilding(pos.x, pos.z) && pos.y > CEIL_H - 0.28) pos.y = CEIL_H - 0.28;
+  return pos;
+}
 function updateRoof() {
-  if (!roofGroup || !camera) return;
-  const p = camera.position;
-  const over = p.x > -11 && p.x < 11 && p.z > -11 && p.z < 11.5;
-  const aboveRoof = p.y > CEIL_H + 0.5;
-  let show;
-  if (roofForced === 'off') show = false;
-  else if (roofForced === 'on') show = true;
-  else show = !(over && aboveRoof);
-  roofGroup.visible = show;
+  if (!roofGroup) return;
+  if (roofForced !== 'off') roofForced = 'on';
+  roofGroup.visible = roofForced !== 'off';
   const btn = document.getElementById('roofToggle');
   if (btn) {
-    const label = roofForced === 'off' ? 'Roof off' : (roofForced === 'on' ? 'Roof on' : (show ? 'Roof auto' : 'Roof auto'));
-    btn.textContent = roofForced === 'off' ? 'Roof off' : (roofForced === 'on' ? 'Roof on' : 'Roof auto');
-    btn.setAttribute('aria-label', 'Roof visibility: ' + roofForced);
+    btn.textContent = roofForced === 'off' ? 'Roof off' : 'Roof on';
+    btn.setAttribute('aria-label', 'Roof visibility: ' + (roofForced === 'off' ? 'off' : 'on'));
+    btn.setAttribute('aria-pressed', roofForced !== 'off' ? 'true' : 'false');
   }
 }
 
 function setRoofMode(mode) {
-  roofForced = (mode === 'on' || mode === 'off') ? mode : 'auto';
+  roofForced = mode === 'off' ? 'off' : 'on';
   try { localStorage.setItem('devameer-flow-roof', roofForced); } catch {}
   updateRoof();
 }
 
 function cycleRoof() {
-  setRoofMode(roofForced === 'auto' ? 'off' : (roofForced === 'off' ? 'on' : 'auto'));
+  setRoofMode(roofForced === 'off' ? 'on' : 'off');
 }
 
 function setSpin(on) {
@@ -1267,6 +1335,8 @@ function buildHeadquarters(w) {
   windowMats.length = 0;
   doorList.length = 0;
   lampPosts.length = 0;
+  pendingInteriors.length = 0;
+  cablesWired = false;
   if (hqRoot && hqRoot.parent) hqRoot.parent.remove(hqRoot);
   hqRoot = new THREE.Group();
   hqRoot.name = 'DevameerBotHQ';
@@ -1403,7 +1473,7 @@ function buildHeadquarters(w) {
   mergeBucket(buckets.tray, trayMat);
   mergeBucket(buckets.trim, trimMat);
 
-  // Ceiling lives on the roof group so cutaway hides it too
+  // Ceiling lives on the roof group so a manual Off still reveals interiors. Roof never auto-hides.
   roofGroup = new THREE.Group();
   roofGroup.name = 'roof';
   mergeBucket(ceilMeshGeo, ceilMat, roofGroup);
@@ -1411,7 +1481,7 @@ function buildHeadquarters(w) {
 
   buildParking(BX0, BX1, BZ1);
 
-  try { roofForced = localStorage.getItem('devameer-flow-roof') || 'auto'; } catch { roofForced = 'auto'; }
+  try { roofForced = localStorage.getItem('devameer-flow-roof') === 'off' ? 'off' : 'on'; } catch { roofForced = 'on'; }
   updateRoof();
 }
 
@@ -1602,7 +1672,7 @@ function buildScene(w) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.22;
-  const pr = Math.min(isMob() ? 1.25 : 1.6, window.devicePixelRatio || 1);
+  const pr = desiredPixelRatio();
   renderer.setPixelRatio(pr);
 
   controls = new OrbitControls(camera, canvas);
@@ -1624,8 +1694,9 @@ function buildScene(w) {
   hemiLight = new THREE.HemisphereLight(0x8a97b5, 0x1a1210, 0.95);
   keyLight = new THREE.DirectionalLight(0xfff2e0, 1.35);
   keyLight.position.set(10, 16, 12);
-  keyLight.castShadow = !isMob();
-  keyLight.shadow.mapSize.set(1024, 1024);
+  keyLight.castShadow = !isMob() && !isWeak();
+  const shadowRes = isWeak() || isMob() ? 512 : 1024;
+  keyLight.shadow.mapSize.set(shadowRes, shadowRes);
   keyLight.shadow.camera.near = 1;
   keyLight.shadow.camera.far = 90;
   keyLight.shadow.camera.left = -32;
@@ -1640,8 +1711,8 @@ function buildScene(w) {
   floorGlow = new THREE.PointLight(0x3b82f6, 1.45, 32, 2);
   floorGlow.position.set(0, 2.4, 0);
   scene.add(hemiLight, keyLight, fillLight, rimLight, floorGlow);
-  renderer.shadowMap.enabled = !isMob();
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = !isMob() && !isWeak();
+  renderer.shadowMap.type = THREE.PCFShadowMap;
 
   makeGeos();
   floor = null;
@@ -1649,21 +1720,9 @@ function buildScene(w) {
   vignette = null;
   clickables.length = 0;
   desks.clear();
+  setLoadProgress(12, 'Building HQ…');
   buildHeadquarters(w);
-
-  cables.length = 0;
-  for (const e of (w.edges || [])) {
-    const a = desks.get(e.from), b = desks.get(e.to);
-    if (!a || !b) continue;
-    const curve = trayCurve(e.from, e.to);
-    if (!curve) continue;
-    const pts = curve.getPoints(32);
-    const g = new THREE.BufferGeometry().setFromPoints(pts);
-    const col = new THREE.Color(a.color || '#3B82F6');
-    const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.42 }));
-    scene.add(line);
-    cables.push({ id: e.id || (e.from + '-' + e.to), from: e.from, to: e.to, curve, color: col, line, heat: 0 });
-  }
+  setLoadProgress(48, 'Lighting the campus…');
 
   packetMesh = null;
   defaultCamera();
@@ -1675,8 +1734,57 @@ function buildScene(w) {
   try { todChoice = localStorage.getItem('devameer-flow-tod') || 'auto'; } catch { todChoice = 'auto'; }
   setTod(todChoice, true);
   fillJumpMenu();
-  applyFxLevel(preferredFx());
+  userFx = preferredFx();
+  applyFxLevel(userFx);
   resizeFx();
+  setLoadProgress(55, 'Furnishing offices…');
+}
+
+function wireCables() {
+  if (cablesWired) return;
+  const w = world();
+  if (!w) return;
+  for (const c of cables) {
+    if (c.line && c.line.parent) c.line.parent.remove(c.line);
+    if (c.line && c.line.geometry) try { c.line.geometry.dispose(); } catch {}
+  }
+  cables.length = 0;
+  for (const e of (w.edges || [])) {
+    const a = desks.get(e.from), b = desks.get(e.to);
+    if (!a || !b) continue;
+    const curve = trayCurve(e.from, e.to);
+    if (!curve) continue;
+    const pts = curve.getPoints(24);
+    const g = new THREE.BufferGeometry().setFromPoints(pts);
+    const col = new THREE.Color(a.color || '#3B82F6');
+    const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.42 }));
+    scene.add(line);
+    cables.push({ id: e.id || (e.from + '-' + e.to), from: e.from, to: e.to, curve, color: col, line, heat: 0 });
+  }
+  cablesWired = true;
+}
+
+function stepFurnish() {
+  const total = pendingInteriors.length + desks.size;
+  if (!pendingInteriors.length) {
+    if (!cablesWired) wireCables();
+    if (!loadDone && built) setLoadProgress(100, 'Ready', true);
+    return;
+  }
+  const n = Math.min(3, pendingInteriors.length);
+  for (let i = 0; i < n; i++) {
+    const it = pendingInteriors.shift();
+    try { furnishOfficeInterior(it.spec, it.node); } catch (e) { console.warn('furnish', it && it.spec && it.spec.id, e); }
+  }
+  const done = desks.size;
+  const left = pendingInteriors.length;
+  const denom = Math.max(1, total || (done + left));
+  setLoadProgress(55 + (done / denom) * 40, 'Furnishing offices… ' + done + '/' + denom);
+  if (!left) {
+    wireCables();
+    fillJumpMenu();
+    setLoadProgress(100, 'Ready', true);
+  }
 }
 
 function ensureCapRenderer(W, H) {
@@ -2010,10 +2118,23 @@ function lastRowsFor(id, w) {
 function stepScreens(now) {
   const w = world();
   if (!w) return;
-  if (wallScreenCtx && Math.floor(now / 500) % 2 === 0) paintWallScreen();
+  const cam = camera && camera.position;
+  const cy = cam ? cam.y : 10;
+  const wallMs = autoTier >= 1 ? 1000 : 500;
+  if (wallScreenCtx && Math.floor(now / wallMs) !== Math.floor((stepScreens._wall || 0) / wallMs)) {
+    paintWallScreen();
+    stepScreens._wall = now;
+  }
   for (const [id, d] of desks) {
+    if (!d || !d.scr) continue;
     const room = rooms.get(id);
-    if (room && room.far && now - (d.lastPaint || 0) < 800) continue;
+    if (room && room.interior && room.interior.visible === false) continue;
+    let dist = 99;
+    if (cam && room) dist = Math.hypot(cam.x - room.cx, cam.z - room.cz);
+    else if (cam && d.root) dist = d.root.position.distanceTo(cam);
+    const far = (room && room.far) || dist > 18 || cy > 8;
+    const minGap = far ? 200 : (dist > 9 ? 140 : 70);
+    if (now - (d.lastPaint || 0) < minGap) continue;
     const mode = agentMode(id, now);
     setStatusColor(d.light, mode);
     const rows = lastRowsFor(id, w);
@@ -2023,17 +2144,19 @@ function stepScreens(now) {
     d.scr.agentId = id;
     d.scr.id = id;
     const last = rows[rows.length - 1];
-    const key = (last ? (last.at + '|' + last.text) : 'empty') + '|' + mode + '|' + (d.scr.flashUntil && now < d.scr.flashUntil ? 'f' : '') + '|' + Math.floor(now / 500);
-    if (key !== d.lastScreen || now - d.lastPaint > 500) {
+    const blink = (!far && dist < 8) ? (Math.floor(now / 500) % 2) : 0;
+    const key = (last ? (last.at + '|' + last.text) : 'empty') + '|' + mode + '|' + (d.scr.flashUntil && now < d.scr.flashUntil ? 'f' : '') + '|' + blink;
+    if (key !== d.lastScreen) {
       paintDeskScreens(d, rows, mode, now);
       d.lastScreen = key;
-      d.lastPaint = now;
     }
+    d.lastPaint = now;
   }
 }
 
 function step(now, dt) {
   if (!built) return;
+  stepFurnish();
   stepFly(dt);
   if (controls && !fly) controls.update();
   for (const d of desks.values()) {
@@ -2067,7 +2190,7 @@ function resize() {
   const h = Math.max(1, Math.floor(r.height));
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  const pr = Math.min(isMob() ? 1.25 : 1.6, window.devicePixelRatio || 1);
+  const pr = desiredPixelRatio();
   renderer.setPixelRatio(pr);
   renderer.setSize(w, h, false);
     resizeFx();
@@ -2170,8 +2293,9 @@ function attach() {
   const canvas = document.getElementById('cv3d');
   if (!canvas) return false;
   if (!built) {
+    setLoadProgress(4, 'Starting 3D engine…');
     try { buildScene(w); }
-    catch (e) { console.warn('3D office failed, staying on 2D', e); return false; }
+    catch (e) { console.warn('3D office failed, staying on 2D', e); setLoadProgress(0, '3D unavailable', true); return false; }
   } else if (desks.size !== w.nodes.length) {
     disposeScene();
     try { buildScene(w); } catch (e) { console.warn(e); return false; }
@@ -2188,6 +2312,9 @@ function disposeScene() {
   }
   desks.clear();
   rooms.clear();
+  pendingInteriors.length = 0;
+  cablesWired = false;
+  loadDone = false;
   cables.length = 0;
   clickables.length = 0;
   colliders.length = 0;
@@ -2209,7 +2336,7 @@ function setActive(on) {
     if (!attach()) { active = false; if (canvas) canvas.classList.add('hidden'); if (cv) cv.classList.remove('hidden'); if (wrap) wrap.classList.remove('is-3d'); return false; }
     hidden = document.hidden;
     lastT = 0;
-    applyTheme(currentTheme());
+    setTod(todChoice, true);
     fillJumpMenu();
     updateOverviewBtn();
     resize();
@@ -2337,15 +2464,18 @@ function setTod(choice, instant) {
   try { localStorage.setItem('devameer-flow-tod', todChoice); } catch {}
   const mode = resolveTod(todChoice);
   const preset = TOD[mode];
-  const prev = TOD[todMode] || preset;
+  const prev = (todTo && todT < 1) ? lerpPreset(todFrom, todTo, todT) : (TOD[todMode] || preset);
   todMode = mode;
-  if (instant) { todFrom = preset; todTo = preset; todT = 1; }
-  else { todFrom = prev; todTo = preset; todT = 0; }
   themeName = preset.ui;
   document.documentElement.setAttribute('data-theme', preset.ui);
-  applyTheme(preset.ui);
-  if (instant) applyTodLighting(preset);
   updateTodUi();
+  if (instant !== false) {
+    todFrom = preset; todTo = preset; todT = 1;
+    applyTodLighting(preset);
+  } else {
+    todFrom = prev; todTo = preset; todT = 0.28;
+    applyTodLighting(lerpPreset(todFrom, todTo, 0.28));
+  }
 }
 function stepTod(dt) {
   if (todChoice === 'auto') {
@@ -2424,6 +2554,7 @@ function applyTheme(name) {
     capRenderer.toneMappingExposure = light ? 1.08 : 1.22;
     capRenderer.shadowMap.enabled = useShadow;
   }
+  if (TOD[todMode]) applyTodLighting(TOD[todMode]);
 }
 
 function monitorFocus(d, tight) {
@@ -3039,8 +3170,11 @@ window.addEventListener('resize', () => { if (active) resize(); });
 
 
 function preferredFx() {
-  try { return localStorage.getItem('devameer-flow-fx') || (isMob() ? 'low' : 'high'); }
-  catch { return isMob() ? 'low' : 'high'; }
+  try {
+    const saved = localStorage.getItem('devameer-flow-fx');
+    if (saved === 'high' || saved === 'low' || saved === 'off') return saved;
+  } catch {}
+  return (isMob() || isWeak()) ? 'low' : 'high';
 }
 
 function setupImmersion() {
@@ -3061,48 +3195,55 @@ function setupComposer(r, isCap) {
   return comp;
 }
 
-function applyFxLevel(level) {
+function applyFxLevel(level, fromAuto) {
   const allowed = { high: 1, low: 1, off: 1 };
-  fxLevel = allowed[level] ? level : 'high';
-  try { localStorage.setItem('devameer-flow-fx', fxLevel); } catch {}
+  const next = allowed[level] ? level : 'high';
+  if (!fromAuto) {
+    userFx = next;
+    fxLevel = next;
+    autoTier = 0;
+    try { localStorage.setItem('devameer-flow-fx', fxLevel); } catch {}
+  } else {
+    fxLevel = next;
+  }
   const high = fxLevel === 'high';
-  const low = fxLevel === 'low';
   const on = fxLevel !== 'off';
   if (bloomPass) {
-    bloomPass.enabled = on;
-    bloomPass.strength = high ? 0.4 : 0.22;
-    bloomPass.threshold = high ? 0.76 : 0.82;
+    const bloomOn = on && high && !isMob() && !isWeak() && autoTier < 1;
+    bloomPass.enabled = bloomOn;
+    bloomPass.strength = 0.4;
+    bloomPass.threshold = 0.76;
   }
-  for (const d of desks.values()) {
-    if (d.lampLight) {
-      d.lampLight.visible = on;
-      d.lampLight.intensity = high ? 0.6 : 0.32;
-    }
-  }
-  const useShadow = on && !isMob();
+  const useShadow = on && !isMob() && !isWeak() && autoTier < 2;
   if (renderer) {
     renderer.shadowMap.enabled = useShadow;
     if (keyLight) keyLight.castShadow = useShadow;
   }
+  if (TOD[todMode]) applyTodLighting(TOD[todMode]);
+  applyPixelRatio();
   const btn = document.getElementById('fxToggle');
   if (btn) {
-    btn.textContent = 'FX ' + (fxLevel === 'off' ? 'Off' : (fxLevel === 'low' ? 'Low' : 'On'));
-    btn.setAttribute('aria-label', 'Effects: ' + fxLevel);
+    const label = autoTier > 0 && userFx !== 'off' ? ('FX Auto') : ('FX ' + (userFx === 'off' ? 'Off' : (userFx === 'low' ? 'Low' : 'On')));
+    btn.textContent = label;
+    btn.setAttribute('aria-label', 'Effects: ' + (autoTier > 0 ? 'auto' : userFx));
   }
 }
 
 function cycleFx() {
-  applyFxLevel(fxLevel === 'high' ? 'low' : (fxLevel === 'low' ? 'off' : 'high'));
+  applyFxLevel(userFx === 'high' ? 'low' : (userFx === 'low' ? 'off' : 'high'));
 }
 
 function autoQuality(dt) {
-  if (fxLevel === 'off') return;
-  if (fps && fps < 28) fpsLowFor += dt;
-  else fpsLowFor = Math.max(0, fpsLowFor - dt * 0.5);
-  if (fpsLowFor > 2.2) {
+  if (userFx === 'off') return;
+  if (fps && fps < 40) fpsLowFor += dt;
+  else fpsLowFor = Math.max(0, fpsLowFor - dt * 0.6);
+  if (fpsLowFor > 1.4) {
     fpsLowFor = 0;
-    if (fxLevel === 'high') applyFxLevel('low');
-    else if (fxLevel === 'low') applyFxLevel('off');
+    if (autoTier < 3) {
+      autoTier += 1;
+      if (autoTier === 1) applyFxLevel(userFx === 'high' ? 'low' : 'off', true);
+      else applyFxLevel('off', true);
+    }
   }
 }
 
@@ -3204,6 +3345,7 @@ function stepWalk(dt) {
       if (walkMarker) walkMarker.material.opacity = 0.4 + 0.5 * Math.abs(Math.sin(performance.now() / 200));
       // still allow look; skip WASD compose this frame after dest move
       camera.position.y = Math.max(0.85, Math.min(8, camera.position.y + y * speed));
+      clampUnderRoof(camera.position);
       return;
     }
   }
@@ -3218,6 +3360,7 @@ function stepWalk(dt) {
   camera.position.addScaledVector(forward, -z * speed);
   camera.position.y += y * speed;
   camera.position.y = Math.max(0.85, Math.min(8, camera.position.y));
+  clampUnderRoof(camera.position);
   resolveWalk(prev);
 }
 
@@ -3296,7 +3439,7 @@ function resizeFx() {
   const r = wrap.getBoundingClientRect();
   const w = Math.max(1, Math.floor(r.width));
   const h = Math.max(1, Math.floor(r.height));
-  const pr = Math.min(isMob() ? 1.25 : 1.6, window.devicePixelRatio || 1);
+  const pr = desiredPixelRatio();
   if (composer) composer.setSize(w, h);
   if (bloomPass && bloomPass.setSize) bloomPass.setSize(w * pr, h * pr);
   if (ssaoPass && ssaoPass.setSize) ssaoPass.setSize(w, h);
@@ -3306,14 +3449,14 @@ window.DevameerOffice = {
   attach, setActive, isActive: () => active, renderCapture, endCapture,
   onEvent, inspect, resize, defaultCamera, lookAtAgent,
   flyToAgent, flyOverview, flyToObject, exitInspect, supported: hasWebGL,
-  setTheme: (n) => setTod(n === 'dark' ? 'night' : 'afternoon', true),
+  setTheme: (n) => setTod((todChoice === 'morning' || todChoice === 'afternoon' || todChoice === 'night') ? todChoice : (n === 'dark' ? 'night' : 'afternoon'), true),
   setTod, tod: () => ({ choice: todChoice, mode: todMode }),
   unlockAudio, setVolume, toggleMute, audioCaptureStream,
   toggleWalk, setWalk, isWalk: () => walkOn,
   toggleTour, setTour, isTour: () => tourOn,
   cycleFx, applyFxLevel, onDoubleClick,
   cycleRoof, setRoofMode, toggleSpin, setSpin,
-  walkToAgent, setWalkDest, exitInspect,
+  walkToAgent, setWalkDest,
   setView(pos, target, instant) {
     if (!camera || !controls) return false;
     const p = new THREE.Vector3(pos[0], pos[1], pos[2]);
@@ -3351,8 +3494,10 @@ window.DevameerOffice = {
       return;
     }
     try { P.applyPreferredView(); } catch (e) { console.warn(e); }
-    if (typeof P.applyTheme === 'function') {
-      try { P.applyTheme(P.theme || currentTheme()); } catch (e) { console.warn(e); }
+    if (typeof P.applyTod === 'function') {
+      try { P.applyTod(P.tod || 'auto', true); } catch (e) { console.warn(e); }
+    } else if (typeof P.setTod === 'function') {
+      try { P.setTod(P.tod || 'auto'); } catch (e) { console.warn(e); }
     }
   };
   tryApply();
