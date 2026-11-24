@@ -42,6 +42,18 @@
     <span class="mode-pill paper" id="modePill">PAPER</span>
     <span class="cap-pill hidden" id="capPill">DAILY CAP</span>
     <button type="button" class="view-btn" id="viewToggle" aria-label="Switch to 2D cards">2D cards</button>
+    <button type="button" class="view-btn" id="themeToggle" aria-label="Switch to light mode">Light</button>
+    <button type="button" class="view-btn hidden" id="camOverview" aria-label="Return to overview">Overview</button>
+    <label class="jump-wrap hidden" id="jumpWrap">
+      <span>Jump</span>
+      <select id="agentJump" aria-label="Jump to agent">
+        <option value="">Agent…</option>
+      </select>
+    </label>
+    <div class="audio-hud" id="audioHud" title="Office sound starts after your first click">
+      <button type="button" class="view-btn audio-btn" id="audioMute" aria-label="Mute office sound">Sound</button>
+      <input id="audioVol" type="range" min="0" max="100" value="70" aria-label="Master volume">
+    </div>
   </header>
   <div id="recHud" class="rec-hud">
     <button type="button" class="rec-btn" id="recToggle" aria-label="Record" aria-expanded="false" title="Record">
@@ -91,7 +103,7 @@
     <canvas id="cv"></canvas>
     <canvas id="cv3d" class="hidden" aria-label="3D office"></canvas>
   </div>
-  <div class="cam-hint hidden" id="camHint">drag to orbit · scroll to zoom</div>
+  <div class="cam-hint hidden" id="camHint">drag to orbit · scroll to zoom · click an agent to fly in · Esc for overview</div>
   <div id="tip" class="tip hidden"></div>
 </section>
 <script src="/pipeline.js"></script>

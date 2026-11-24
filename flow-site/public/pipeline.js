@@ -67,6 +67,10 @@
       try { return localStorage.getItem('devameer-flow-view') === '2d' ? '2d' : '3d'; }
       catch { return '3d'; }
     })(),
+    theme: (function () {
+      try { return localStorage.getItem('devameer-flow-theme') === 'light' ? 'light' : 'dark'; }
+      catch { return 'dark'; }
+    })(),
     worldListeners: [],
   };
 
@@ -77,6 +81,7 @@
   };
 
   const isMob = () => Math.min(window.innerWidth, window.innerHeight) < 720 || 'ontouchstart' in window;
+  const isLight = () => state.theme === 'light' || document.documentElement.getAttribute('data-theme') === 'light';
   const cap = () => isMob() ? PARTICLE_CAP_MOB : PARTICLE_CAP_DESK;
   const $ = (s, r = document) => r.querySelector(s);
   const nodeById = (id) => state.nodes.find((n) => n.id === id);
@@ -350,6 +355,17 @@
     if (rows.length > SCREEN_CAP) rows.splice(0, rows.length - SCREEN_CAP);
   }
 
+  function pushScreenLine(id, text, tone, at) {
+    if (!id || !text) return;
+    const rows = state.screens[id] || (state.screens[id] = []);
+    const line = String(text).replace(/\s+/g, ' ').trim();
+    if (!line) return;
+    const last = rows[rows.length - 1];
+    if (last && last.text === line && (at || Date.now()) - (last.at || 0) < 400) return;
+    rows.push({ text: line.length > 56 ? line.slice(0, 55) + '…' : line, at: at || Date.now(), tone: tone || '#93C5FD', incoming: true });
+    if (rows.length > SCREEN_CAP) rows.splice(0, rows.length - SCREEN_CAP);
+  }
+
   function agentMode(n, now) {
     const id = n.id;
     const blockedCap = !!(state.status && (state.status.dailyLossHit || state.status.goalHold) && (id === 'risk' || id === 'buy'));
@@ -378,12 +394,12 @@
 
   function drawMonitor(ctx, n, x, y, w, h, now, mode) {
     // Computer bezel
-    ctx.fillStyle = '#1A1A1E';
-    ctx.strokeStyle = '#2A2A30';
+    ctx.fillStyle = isLight() ? '#E2E8F0' : '#1A1A1E';
+    ctx.strokeStyle = isLight() ? '#CBD5E1' : '#2A2A30';
     ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.roundRect(x, y, w, h, 7); ctx.fill(); ctx.stroke();
     // Title bar
-    ctx.fillStyle = '#121216';
+    ctx.fillStyle = isLight() ? '#CBD5E1' : '#121216';
     ctx.beginPath(); ctx.roundRect(x + 1, y + 1, w - 2, 12, 5);
     ctx.fill();
     const dots = ['#F43F5E', '#F59E0B', '#22C55E'];
@@ -398,7 +414,7 @@
     ctx.fillText((n.name || n.id).toLowerCase() + '.sh', x + w - 6, y + 7);
 
     const sx = x + 4, sy = y + 14, sw = w - 8, sh = h - 18;
-    ctx.fillStyle = '#070709';
+    ctx.fillStyle = isLight() ? '#0F172A' : '#070709';
     ctx.beginPath(); ctx.roundRect(sx, sy, sw, sh, 4); ctx.fill();
 
     ctx.save();
@@ -470,7 +486,7 @@
 
     ctx.shadowColor = outline;
     ctx.shadowBlur = 8 + Math.max(amt, feedIdle) * 18;
-    ctx.fillStyle = '#121214';
+    ctx.fillStyle = isLight() ? '#F8FAFC' : '#121214';
     ctx.strokeStyle = outline;
     ctx.lineWidth = 1.8;
     ctx.beginPath();
@@ -498,14 +514,14 @@
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.font = '700 11px Inter,system-ui,sans-serif';
-    ctx.fillStyle = '#FAFAFA';
+    ctx.fillStyle = isLight() ? '#0F172A' : '#FAFAFA';
     const nameX = box.x + 52;
     const nameMax = box.w - 52 - 28;
     ctx.fillText(clipText(ctx, agentTitle(n), nameMax), nameX, box.y + 16);
 
     // Live status line
     ctx.font = '600 9px Inter,system-ui,sans-serif';
-    ctx.fillStyle = mode === 'blocked' ? '#FCA5A5' : (mode === 'working' ? '#E4E4E7' : '#A1A1AA');
+    ctx.fillStyle = mode === 'blocked' ? '#B91C1C' : (mode === 'working' ? (isLight() ? '#334155' : '#E4E4E7') : (isLight() ? '#64748B' : '#A1A1AA'));
     const statusText = status ? clipText(ctx, status, nameMax) : (mode === 'idle' ? '—' : '');
     ctx.fillText(statusText, nameX, box.y + 30);
 
@@ -523,7 +539,7 @@
 
     // Last active + count
     ctx.font = '600 8px Inter,system-ui,sans-serif';
-    ctx.fillStyle = '#71717A';
+    ctx.fillStyle = isLight() ? '#64748B' : '#71717A';
     const ago = st.lastAt ? ('last active ' + relTime(st.lastAt)) : 'last active —';
     const count = evN ? ('  ·  ' + evN) : '';
     ctx.fillText(clipText(ctx, ago + count, nameMax), nameX, box.y + 43);
@@ -807,12 +823,12 @@
     const cam = (target && target.cam) || state.cam;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#0B0B0D';
+    ctx.fillStyle = isLight() ? '#E8EEF6' : '#0B0B0D';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // screen-space dot grid
     const step = 22 * dpr;
-    ctx.fillStyle = 'rgba(255,255,255,0.045)';
+    ctx.fillStyle = isLight() ? 'rgba(15,23,42,0.08)' : 'rgba(255,255,255,0.045)';
     const ox = (cam.x * dpr) % step, oy = (cam.y * dpr) % step;
     for (let x = ox; x < canvas.width; x += step) {
       for (let y = oy; y < canvas.height; y += step) {
@@ -1159,7 +1175,45 @@
       viewBtn._bound = true;
       viewBtn.addEventListener('click', () => setViewMode(state.viewMode === '3d' ? '2d' : '3d'));
     }
+    const themeBtn = $('#themeToggle');
+    if (themeBtn && !themeBtn._bound) {
+      themeBtn._bound = true;
+      themeBtn.addEventListener('click', () => setTheme(state.theme === 'light' ? 'dark' : 'light'));
+    }
+    const ov = $('#camOverview');
+    if (ov && !ov._bound) {
+      ov._bound = true;
+      ov.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.flyOverview) window.DevameerOffice.flyOverview(); });
+    }
+    const jump = $('#agentJump');
+    if (jump && !jump._bound) {
+      jump._bound = true;
+      jump.addEventListener('change', () => {
+        const id = jump.value;
+        if (id && window.DevameerOffice && window.DevameerOffice.flyToAgent) window.DevameerOffice.flyToAgent(id);
+        jump.value = '';
+      });
+    }
+    const mute = $('#audioMute');
+    const vol = $('#audioVol');
+    if (mute && !mute._bound) {
+      mute._bound = true;
+      mute.addEventListener('click', () => {
+        if (window.DevameerOffice && window.DevameerOffice.toggleMute) window.DevameerOffice.toggleMute();
+      });
+    }
+    if (vol && !vol._bound) {
+      vol._bound = true;
+      try {
+        const v = localStorage.getItem('devameer-flow-volume');
+        if (v != null) vol.value = String(Math.round(Math.max(0, Math.min(1, +v)) * 100));
+      } catch {}
+      vol.addEventListener('input', () => {
+        if (window.DevameerOffice && window.DevameerOffice.setVolume) window.DevameerOffice.setVolume((+vol.value || 0) / 100);
+      });
+    }
     updateViewToggle();
+    updateThemeToggle();
   }
   function zoomAt(cx, cy, k) {
     const wrap = $('#wrap').getBoundingClientRect();
@@ -1227,7 +1281,7 @@
 
   async function open() {
     state.open = true;
-    document.documentElement.setAttribute('data-theme', 'dark');
+    applyTheme(state.theme || 'dark');
     bind();
     resize();
     const ok = await load();
@@ -1319,6 +1373,8 @@
       btn.setAttribute('aria-label', is3d ? 'Switch to 2D cards' : 'Switch to 3D office');
     }
     if (hint) hint.classList.toggle('hidden', state.viewMode !== '3d');
+    const jumpWrap = $('#jumpWrap');
+    if (jumpWrap) jumpWrap.classList.toggle('hidden', state.viewMode !== '3d');
   }
 
   function setViewMode(mode) {
@@ -1354,6 +1410,30 @@
       setViewMode('2d');
     }
   }
+
+  function updateThemeToggle() {
+    const btn = $('#themeToggle');
+    if (btn) {
+      const light = state.theme === 'light';
+      btn.textContent = light ? 'Dark' : 'Light';
+      btn.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
+    }
+  }
+
+  function applyTheme(mode) {
+    const next = mode === 'light' ? 'light' : 'dark';
+    state.theme = next;
+    document.documentElement.setAttribute('data-theme', next);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', next === 'light' ? '#E8EEF6' : '#0B0B0D');
+    try { localStorage.setItem('devameer-flow-theme', next); } catch {}
+    updateThemeToggle();
+    if (window.DevameerOffice && window.DevameerOffice.setTheme) {
+      try { window.DevameerOffice.setTheme(next); } catch (e) { console.warn(e); }
+    }
+  }
+
+  function setTheme(mode) { applyTheme(mode); }
 
   function snapWorld() {
     return {
@@ -1449,9 +1529,10 @@
     open, close, resize, fit: () => goFit(false), setStatus,
     aspectSize, ensureRecCanvas, drawCapture, endCapture, stepWorld,
     onEvent, seedSilent, clearMotion, snapWorld, restoreWorld, playEvents,
-    clock, world, agentModeOf, setViewMode, applyPreferredView,
+    clock, world, agentModeOf, setViewMode, applyPreferredView, setTheme, applyTheme, pushScreenLine,
     onWorldEvent(fn) { if (typeof fn === 'function') state.worldListeners.push(fn); },
     get viewMode() { return state.viewMode; },
+    get theme() { return state.theme; },
     get holdLive() { return state.holdLive; },
     set holdLive(v) { state.holdLive = !!v; },
     get freezeWorld() { return state.freezeWorld; },

@@ -167,15 +167,27 @@ app.post('/api/flow/transcode', requireSession, express.raw({ type: () => true, 
   const out = path.join(tmp, 'out.mp4');
   try {
     fs.writeFileSync(inn, buf);
+    const hasAudio = await new Promise((resolve) => {
+      const pr = spawn(ffmpegBin(), ['-hide_banner', '-i', inn]);
+      let err = '';
+      pr.stderr.on('data', (d) => { err += d; });
+      pr.on('close', () => resolve(/Audio:/.test(err)));
+      pr.on('error', () => resolve(false));
+      setTimeout(() => { try { pr.kill('SIGKILL'); } catch {} resolve(/Audio:/.test(err)); }, 8000);
+    });
     await new Promise((resolve, reject) => {
-      const ff = spawn(ffmpegBin(), [
+      const args = [
         '-y', '-hide_banner', '-loglevel', 'error', '-i', inn,
         '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2,fps=30',
         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', '30',
         '-preset', 'ultrafast', '-crf', '23',
         '-profile:v', 'high', '-level', '4.1',
-        '-threads', '0', '-an', '-movflags', '+faststart', out,
-      ]);
+        '-threads', '0',
+      ];
+      if (hasAudio) args.push('-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000');
+      else args.push('-an');
+      args.push('-movflags', '+faststart', out);
+      const ff = spawn(ffmpegBin(), args);
       let err = '';
       ff.stderr.on('data', (d) => { err += d; });
       const to = setTimeout(() => { try { ff.kill('SIGKILL'); } catch {} reject(new Error('transcode timed out')); }, 8 * 60 * 1000);

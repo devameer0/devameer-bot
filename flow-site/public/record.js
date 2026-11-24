@@ -146,10 +146,30 @@
     };
   }
 
+  function audioTrack() {
+    try {
+      const O = window.DevameerOffice;
+      if (!O || typeof O.audioCaptureStream !== 'function') return null;
+      const s = O.audioCaptureStream();
+      const t = s && s.getAudioTracks && s.getAudioTracks()[0];
+      return t || null;
+    } catch { return null; }
+  }
+
   function createRecorder(canvas, W, H) {
     if (typeof MediaRecorder === 'undefined' || !canvas.captureStream) return null;
     const stream = canvas.captureStream(FPS);
+    const aTrack = audioTrack();
+    if (aTrack && !stream.getAudioTracks().some((t) => t.id === aTrack.id)) {
+      try { stream.addTrack(aTrack); } catch {}
+    }
+    const hasA = stream.getAudioTracks().length > 0;
     const mime = [
+      hasA && 'video/mp4;codecs=avc1.640028,mp4a.40.2',
+      hasA && 'video/webm;codecs=vp9,opus',
+      hasA && 'video/webm;codecs=vp8,opus',
+      hasA && 'video/webm;codecs=vp9',
+      hasA && 'video/webm',
       'video/mp4;codecs=avc1.640028',
       'video/mp4;codecs=avc1.4d0028',
       'video/mp4;codecs=avc1.420028',
@@ -158,7 +178,7 @@
       'video/webm;codecs=vp9',
       'video/webm;codecs=vp8',
       'video/webm',
-    ].find((m) => MediaRecorder.isTypeSupported(m));
+    ].filter(Boolean).find((m) => MediaRecorder.isTypeSupported(m));
     if (!mime) return null;
     const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 3_500_000 });
     const chunks = [];
@@ -199,6 +219,13 @@
   }
 
   async function makeEncoder(canvas, W, H) {
+    // When office audio is available, prefer MediaRecorder so the mixed
+    // WebAudio track can be transcoded to AAC with the H.264 video.
+    const hasA = !!audioTrack();
+    if (hasA) {
+      const rec = createRecorder(canvas, W, H);
+      if (rec) return rec;
+    }
     const wc = await createWebCodecs(canvas, W, H).catch(() => null);
     if (wc) {
       try {
