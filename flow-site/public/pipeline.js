@@ -205,8 +205,8 @@
   }
 
   function onEvent(ev, opts) {
+    if (ev && ev.status) setStatus(ev.status);
     if (!ev || ev.type === 'hello') {
-      if (ev && ev.status) setStatus(ev.status);
       return;
     }
     const nowTs = (opts && opts.now != null) ? opts.now : clock.now();
@@ -219,6 +219,9 @@
     if (ev.type === 'error') st.errors++;
     state.lastEv[n] = ev;
     const pow = powerOf(ev);
+    const reason = ev.data && ev.data.reason;
+    if (reason === 'daily cap') setStatus({ dailyLossHit: true });
+    else if (reason === 'goal hold') setStatus({ goalHold: true });
     if (silent) {
       return;
     }
@@ -283,6 +286,14 @@
       const mode = state.status.mode || (state.status.dryRun ? 'PAPER' : 'LIVE');
       pill.textContent = mode;
       pill.className = 'mode-pill ' + (mode === 'LIVE' ? 'live' : 'paper');
+    }
+    const cap = $('#capPill');
+    if (cap) {
+      const hit = !!state.status.dailyLossHit;
+      const hold = !!state.status.goalHold;
+      cap.classList.toggle('hidden', !hit && !hold);
+      if (hit) cap.textContent = 'DAILY CAP';
+      else if (hold) cap.textContent = 'GOAL HOLD';
     }
   }
   function setLive(on) {
@@ -651,13 +662,7 @@
       const nh = h * Math.exp(-dt * 1.35);
       if (nh < 0.01) state.heat.delete(id); else state.heat.set(id, nh);
     }
-    const ambient = ['feed-rugs', 'rpc-rugs', 'rpc-monitor', 'feed-monitor', 'jupiter-buy'];
-    for (const id of ambient) {
-      if (Math.random() < dt * (0.9 + (id.startsWith('feed') ? 1.2 * (0.5 + 0.5 * Math.sin(now / 900)) : 0.4))) {
-        if ((state.heat.get(id) || 0) < 0.2) addHeat(id, 0.08);
-        spawnParticles(id, 1, undefined, 0.7);
-      }
-    }
+    // No ambient / demo particles — motion comes only from real SSE events.
     const keep = [];
     for (const p of state.particles) {
       p.t += p.speed * dt;
@@ -833,7 +838,7 @@
       state.lastEv[n] = ev;
       if (ev.data && ev.data.pnlPct != null && (n === 'sell' || n === 'exits')) state.pnl.exits = ev.data.pnlPct;
     }
-    // seed a little heat so first paint isn't dead
+    // replay the latest real events as pulses (no synthetic motion)
     for (const ev of evs.slice(-12)) {
       const edge = findEdge(ev.from, ev.node);
       if (edge) { addHeat(edge.id, 0.4); spawnParticles(edge.id, 4, nodeById(ev.from)?.color, 1); }

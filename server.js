@@ -93,7 +93,7 @@ const safeEq = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(Str
       const s = engine.summary();
       return res.json({
         bot: { name: cfg.BOT_NAME, badge: cfg.BADGE },
-        mode: engine.mode, running: engine.running, goalHold: engine.goalHold, authed: false, flowRead: true,
+        mode: engine.mode, running: engine.running, goalHold: engine.goalHold, dailyLossHit: engine.dailyLossHit(), authed: false, flowRead: true,
         dryRun: cfg.DRY_RUN, solUsd: market.solUsd,
         summary: { pnl: s.pnl, realized: s.realized, unreal: s.unreal, open: s.open, count: s.count, winRate: s.winRate, mult: s.mult },
         feed: { wsConnected: !!market.stats.wsConnected, watching: market.watchList().length, tracked: market.tokens.size, newTokens: market.stats.newTokens },

@@ -250,23 +250,53 @@ class Engine {
       this.event('confetti', {});
       flow.emit({ node: 'risk', type: 'reject', ok: false, message: `goal ${this.settings.goal}x reached — new buys on hold` });
     }
-    if (this.goalHold) return;
-    if (this.dailyLossHit()) { if (!this._lossLogged) { this.log(`daily loss limit ${cfg.DAILY_LOSS_LIMIT_SOL} SOL hit. no new buys today`, 'err'); this._lossLogged = dayKey(); flow.emit({ node: 'risk', type: 'reject', ok: false, message: `daily loss limit ${cfg.DAILY_LOSS_LIMIT_SOL} SOL hit` }); flow.emit({ node: 'errors', type: 'error', from: 'risk', ok: false, message: `daily loss limit hit — no new buys` }); } return; }
     if (this._lossLogged && this._lossLogged !== dayKey()) this._lossLogged = null;
-    if (this.open().length + this.busy.size >= cfg.MAX_OPEN_POSITIONS) { flow.emit({ node: 'risk', type: 'reject', ok: false, message: `max open positions (${cfg.MAX_OPEN_POSITIONS})` }); return; }
-    if (Date.now() - this.lastBuyAt < 5000) return;
-    for (const c of this.candidates()) {
-      if (this.open().length + this.busy.size >= cfg.MAX_OPEN_POSITIONS) break;
-      this.tried.add(c.t.mint);
+    let skipBuys = null;
+    if (this.goalHold) skipBuys = 'goal hold';
+    else if (this.dailyLossHit()) {
+      if (!this._lossLogged) {
+        this.log(`daily loss limit ${cfg.DAILY_LOSS_LIMIT_SOL} SOL hit. no new buys today — still scanning`, 'err');
+        this._lossLogged = dayKey();
+        flow.emit({ node: 'risk', type: 'reject', ok: false, message: 'skipped: daily cap — still scanning', data: { reason: 'daily cap' }, status: { dailyLossHit: true } });
+        flow.emit({ node: 'errors', type: 'error', from: 'risk', ok: false, message: 'skipped: daily cap — no new buys, scanner stays on' });
+      }
+      skipBuys = 'daily cap';
+    } else if (this.open().length + this.busy.size >= cfg.MAX_OPEN_POSITIONS) {
+      skipBuys = 'max open positions';
+    }
+    // Keep evaluating live candidates even when buys are capped so the flow
+    // canvas shows real coins and reasons instead of going idle.
+    if (!skipBuys && Date.now() - this.lastBuyAt < 5000) return;
+    const cand = this.candidates();
+    if (skipBuys && !cand.length) {
+      if (!this._skipPulse || Date.now() - this._skipPulse > 15000) {
+        this._skipPulse = Date.now();
+        const msg = skipBuys === 'daily cap' ? 'skipped: daily cap — scanning, no candidates yet' : `scanning · skipped: ${skipBuys}`;
+        flow.emit({ node: 'risk', type: 'status', ok: true, message: msg, data: { reason: skipBuys }, status: skipBuys === 'daily cap' ? { dailyLossHit: true } : skipBuys === 'goal hold' ? { goalHold: true } : undefined });
+      }
+      return;
+    }
+    for (const c of cand) {
       flow.emit({ node: c.agent, type: 'candidate', mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, from: 'rpc', message: c.why });
       const bad = await this.rugCheck(c.t, c.agent);
       if (bad) {
+        this.tried.add(c.t.mint);
         this.log(`skipped ${$(c.t)} - ${bad}`, 'skip');
         flow.emit({ node: 'rugs', type: 'reject', ok: false, mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, from: c.agent, message: `rejected ${$(c.t)} — ${bad}`, data: { reason: bad } });
         flow.emit({ node: 'errors', type: 'reject', from: 'rugs', ok: false, mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, message: `skipped ${$(c.t)} — ${bad}` });
         continue;
       }
       flow.emit({ node: 'rugs', type: 'pass', ok: true, mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, from: c.agent, message: `passed rug filters · ${$(c.t)}` });
+      if (skipBuys) {
+        const label = skipBuys === 'daily cap' ? 'skipped: daily cap' : `skipped: ${skipBuys}`;
+        flow.emit({
+          node: 'risk', type: 'reject', ok: false, mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, from: 'rugs',
+          message: `${label} · ${$(c.t)}`,
+          data: { reason: skipBuys, dailyLossLimitSol: skipBuys === 'daily cap' ? cfg.DAILY_LOSS_LIMIT_SOL : undefined, maxOpen: cfg.MAX_OPEN_POSITIONS },
+          status: skipBuys === 'daily cap' ? { dailyLossHit: true } : skipBuys === 'goal hold' ? { goalHold: true } : undefined,
+        });
+        break;
+      }
       flow.emit({ node: 'risk', type: 'pass', ok: true, mint: c.t.mint, symbol: c.t.symbol, agent: c.agent, from: c.agent, message: `risk cleared for ${$(c.t)}` });
       await this.enter(c);
       break; // one entry per tick
