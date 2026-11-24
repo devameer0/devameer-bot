@@ -1325,9 +1325,10 @@
     const want = mode === '2d' ? '2d' : '3d';
     if (want === '3d') {
       const Office = window.DevameerOffice;
-      if (!Office || !Office.setActive(true)) {
-        // Keep 3d preference; stay on 2D until the office module is ready (or WebGL fails).
-        if (Office) {
+      if (!Office) { updateViewToggle(); return false; }
+      if (!Office.setActive(true)) {
+        // Temporary (world not loaded yet). Only give up if WebGL itself is missing.
+        if (typeof Office.supported === 'function' && !Office.supported()) {
           state.viewMode = '2d';
           try { localStorage.setItem('devameer-flow-view', '2d'); } catch {}
         }

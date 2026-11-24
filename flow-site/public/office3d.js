@@ -886,15 +886,40 @@ function inspect() {
 document.addEventListener('visibilitychange', () => { hidden = document.hidden; if (!hidden) lastT = 0; });
 window.addEventListener('resize', () => { if (active) resize(); });
 
+function lookAtAgent(id, dist) {
+  const d = desks.get(id);
+  if (!d || !camera || !controls) return false;
+  const gap = dist == null ? 3.4 : dist;
+  const p = d.root.position.clone();
+  p.y += 0.72;
+  camera.position.set(p.x + gap * 0.55, p.y + 1.45, p.z + gap);
+  controls.target.copy(p);
+  controls.update();
+  return true;
+}
+
 window.DevameerOffice = {
   attach, setActive, isActive: () => active, renderCapture, endCapture,
-  onEvent, inspect, resize, defaultCamera,
+  onEvent, inspect, resize, defaultCamera, lookAtAgent,
+  supported: hasWebGL,
 };
 
 (function boot() {
   const P = pipe();
   if (P && typeof P.onWorldEvent === 'function') P.onWorldEvent(onEvent);
-  if (P && typeof P.applyPreferredView === 'function') {
+  let tries = 0;
+  const tryApply = () => {
+    const P = pipe();
+    if (!P || typeof P.applyPreferredView !== 'function') {
+      if (tries++ < 40) setTimeout(tryApply, 200);
+      return;
+    }
+    const w = typeof P.world === 'function' ? P.world() : null;
+    if (!w || !w.nodes || !w.nodes.length) {
+      if (tries++ < 40) setTimeout(tryApply, 200);
+      return;
+    }
     try { P.applyPreferredView(); } catch (e) { console.warn(e); }
-  }
+  };
+  tryApply();
 })();
