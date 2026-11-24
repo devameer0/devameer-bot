@@ -46,6 +46,7 @@
     pnl: {},
     lastEv: {},
     screens: {},
+    configs: {},
     focus: { x: 0, y: 0, w: 1, at: 0 },
     activity: [],
     hover: null,
@@ -344,6 +345,66 @@
     return s.length > 42 ? s.slice(0, 41) + '…' : s;
   }
 
+  function agentNameOf(id) {
+    const n = nodeById(id);
+    if (n && n.name) return n.name;
+    const a = AGENTS[id];
+    return (a && a.name) || id || '';
+  }
+
+  function thinkPhrase(ev) {
+    const id = ev && ev.node;
+    if (id === 'rugs') return 'applying rug filters';
+    if (id === 'risk') return 'checking open positions, daily cap, and goal hold';
+    if (id === 'buy') return 'placing buy against the live quote';
+    if (id === 'sell') return 'executing the exit sell';
+    if (id === 'exits') return 'checking take profit, stop loss, and max hold';
+    if (id === 'sniper') return 'scoring a fresh launch';
+    if (id === 'scout') return 'scoring live-hype / X-linked flow';
+    if (id === 'curve') return 'reading bonding-curve progress and momentum';
+    if (id === 'graduate') return 'checking near-graduation progress';
+    if (id === 'monitor') return 'marking open positions';
+    if (id === 'feed') return 'ingesting the PumpPortal feed';
+    if (id === 'jupiter') return 'quoting SOL/USD';
+    if (id === 'rpc') return 'polling on-chain curve state';
+    if (id === 'db') return 'writing the ledger';
+    if (id === 'share') return 'preparing a public replay';
+    if (id === 'withdraw') return 'recording a withdrawal';
+    if (id === 'errors') return 'raising an alert';
+    return 'processing';
+  }
+
+  function resultLine(ev) {
+    if (!ev) return '';
+    const msg = String(ev.message || '').replace(/\s+/g, ' ').trim();
+    const reason = ev.data && ev.data.reason ? String(ev.data.reason) : '';
+    const cut = (s) => s.replace(/^rejected\s+\$\S+\s+[—-]\s+/i, '').replace(/^passed rug filters\s*·\s*/i, '').replace(/^skipped:\s*/i, '');
+    if (ev.ok === false || ev.type === 'reject' || ev.type === 'error') {
+      const body = reason || cut(msg) || ev.type || 'rejected';
+      const tag = ev.type === 'error' ? 'ERROR' : 'REJECT';
+      return tag + ' · ' + body;
+    }
+    if (ev.type === 'pass') return 'PASS · ' + (cut(msg) || 'cleared');
+    if (ev.type === 'buy') return 'BUY · ' + (msg || 'buy');
+    if (ev.type === 'sell') return 'SELL · ' + (msg || 'sell');
+    if (ev.type === 'exit') return 'EXIT · ' + (reason || msg || 'exit');
+    if (ev.type === 'open') return 'OPEN · ' + (msg || 'tracking');
+    if (msg) return msg;
+    return ev.type || 'ok';
+  }
+
+  function inputLine(ev) {
+    if (!ev) return '';
+    const sym = ev.symbol ? ('$' + String(ev.symbol).replace(/^\$/, '')) : '';
+    const from = ev.from ? agentNameOf(ev.from) : '';
+    if (sym && from) return '> input: ' + sym + ' from ' + from;
+    if (sym) return '> input: ' + sym;
+    if (ev.type === 'incoming') return ev.message || ev.text || '';
+    const line = screenLine(ev);
+    if (ev.type === 'status' || ev.type === 'tick' || ev.type === 'price' || ev.type === 'lists') return '> ' + (ev.type) + ': ' + line;
+    return '> input: ' + line;
+  }
+
   function pushScreen(id, ev) {
     if (!id || !ev || ev.type === 'hello') return;
     const line = screenLine(ev);
@@ -351,7 +412,15 @@
     const rows = state.screens[id] || (state.screens[id] = []);
     const last = rows[rows.length - 1];
     if (last && last.text === line && (ev.at || 0) - (last.at || 0) < 800) return;
-    rows.push({ text: line, at: ev.at || Date.now(), tone: screenTone(ev) });
+    rows.push({
+      text: line,
+      at: ev.at || Date.now(),
+      tone: screenTone(ev),
+      input: inputLine(ev),
+      think: thinkPhrase(ev),
+      result: resultLine(ev),
+      fresh: true,
+    });
     if (rows.length > SCREEN_CAP) rows.splice(0, rows.length - SCREEN_CAP);
   }
 
@@ -362,7 +431,8 @@
     if (!line) return;
     const last = rows[rows.length - 1];
     if (last && last.text === line && (at || Date.now()) - (last.at || 0) < 400) return;
-    rows.push({ text: line.length > 56 ? line.slice(0, 55) + '…' : line, at: at || Date.now(), tone: tone || '#93C5FD', incoming: true });
+    const short = line.length > 56 ? line.slice(0, 55) + '…' : line;
+    rows.push({ text: short, at: at || Date.now(), tone: tone || '#93C5FD', incoming: true, input: short.startsWith('incoming:') ? ('> ' + short) : ('> input: ' + short), think: 'receiving a handoff', result: short, fresh: true });
     if (rows.length > SCREEN_CAP) rows.splice(0, rows.length - SCREEN_CAP);
   }
 
@@ -1158,7 +1228,8 @@
     wrap.addEventListener('dblclick', (e) => {
       e.preventDefault();
       if (state.viewMode === '3d') {
-        if (window.DevameerOffice && window.DevameerOffice.defaultCamera) window.DevameerOffice.defaultCamera();
+        if (window.DevameerOffice && window.DevameerOffice.onDoubleClick) window.DevameerOffice.onDoubleClick(e);
+        else if (window.DevameerOffice && window.DevameerOffice.defaultCamera) window.DevameerOffice.defaultCamera();
         return;
       }
       goFit(false); state.cam.userAt = 0; state.cam.auto = true;
@@ -1205,12 +1276,40 @@
     if (vol && !vol._bound) {
       vol._bound = true;
       try {
-        const v = localStorage.getItem('devameer-flow-volume');
-        if (v != null) vol.value = String(Math.round(Math.max(0, Math.min(1, +v)) * 100));
+        const v = localStorage.getItem('devameer-flow-volume-v3');
+        if (v != null && isFinite(+v)) vol.value = String(Math.round(Math.max(0, Math.min(1, +v)) * 100));
+        else vol.value = '90';
       } catch {}
+      const pct = $('#audioPct');
+      if (pct) pct.textContent = vol.value + '%';
       vol.addEventListener('input', () => {
         if (window.DevameerOffice && window.DevameerOffice.setVolume) window.DevameerOffice.setVolume((+vol.value || 0) / 100);
+        const p = $('#audioPct');
+        if (p) p.textContent = vol.value + '%';
       });
+    }
+    const en = $('#soundEnable');
+    if (en && !en._bound) {
+      en._bound = true;
+      en.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (window.DevameerOffice && window.DevameerOffice.unlockAudio) window.DevameerOffice.unlockAudio(true);
+      });
+    }
+    const walkBtn = $('#walkToggle');
+    if (walkBtn && !walkBtn._bound) {
+      walkBtn._bound = true;
+      walkBtn.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.toggleWalk) window.DevameerOffice.toggleWalk(); });
+    }
+    const tourBtn = $('#tourToggle');
+    if (tourBtn && !tourBtn._bound) {
+      tourBtn._bound = true;
+      tourBtn.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.toggleTour) window.DevameerOffice.toggleTour(); });
+    }
+    const fxBtn = $('#fxToggle');
+    if (fxBtn && !fxBtn._bound) {
+      fxBtn._bound = true;
+      fxBtn.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.cycleFx) window.DevameerOffice.cycleFx(); });
     }
     updateViewToggle();
     updateThemeToggle();
@@ -1233,6 +1332,7 @@
     state.nodes = (d.nodes || []).map((n) => relabel({ ...n }));
     state.edges = d.edges || [];
     state.stats = d.stats || {};
+    state.configs = d.configs || {};
     setStatus(d.status || {});
     return true;
   }
@@ -1355,6 +1455,7 @@
       status: state.status,
       pulse: state.pulse,
       heat: state.heat,
+      configs: state.configs,
     };
   }
 
@@ -1375,6 +1476,10 @@
     if (hint) hint.classList.toggle('hidden', state.viewMode !== '3d');
     const jumpWrap = $('#jumpWrap');
     if (jumpWrap) jumpWrap.classList.toggle('hidden', state.viewMode !== '3d');
+    ['walkToggle', 'tourToggle', 'fxToggle'].forEach((id) => {
+      const el = $('#' + id);
+      if (el) el.classList.toggle('hidden', state.viewMode !== '3d');
+    });
   }
 
   function setViewMode(mode) {

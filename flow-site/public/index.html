@@ -50,10 +50,9 @@
         <option value="">Agent…</option>
       </select>
     </label>
-    <div class="audio-hud" id="audioHud" title="Office sound starts after your first click">
-      <button type="button" class="view-btn audio-btn" id="audioMute" aria-label="Mute office sound">Sound</button>
-      <input id="audioVol" type="range" min="0" max="100" value="70" aria-label="Master volume">
-    </div>
+    <button type="button" class="view-btn hidden" id="walkToggle" aria-label="Enter walk mode">Walk</button>
+    <button type="button" class="view-btn hidden" id="tourToggle" aria-label="Start cinematic tour">Tour</button>
+    <button type="button" class="view-btn hidden" id="fxToggle" aria-label="Toggle cinematic FX">FX High</button>
   </header>
   <div id="recHud" class="rec-hud">
     <button type="button" class="rec-btn" id="recToggle" aria-label="Record" aria-expanded="false" title="Record">
@@ -103,7 +102,34 @@
     <canvas id="cv"></canvas>
     <canvas id="cv3d" class="hidden" aria-label="3D office"></canvas>
   </div>
-  <div class="cam-hint hidden" id="camHint">drag to orbit · scroll to zoom · click an agent to fly in · Esc for overview</div>
+  <div class="cam-hint hidden" id="camHint">drag to orbit · scroll to zoom · click an agent to fly in · double-click to go there · Esc for overview</div>
+  <div class="sound-dock" id="soundDock">
+    <button type="button" class="sound-speaker" id="audioMute" aria-label="Mute office sound">
+      <span class="spk" aria-hidden="true">🔊</span>
+      <span class="spk-label">Sound</span>
+    </button>
+    <div class="sound-slider-wrap">
+      <input id="audioVol" type="range" min="0" max="100" value="90" step="1" aria-label="Master volume">
+      <span id="audioPct" class="sound-pct">90%</span>
+    </div>
+  </div>
+  <div class="sound-gate" id="soundGate">
+    <button type="button" id="soundEnable" class="sound-enable">
+      <span class="spk big" aria-hidden="true">🔊</span>
+      <strong>Tap to enable sound</strong>
+      <em>Office typing, handoffs, and room tone</em>
+    </button>
+  </div>
+  <div class="walk-ui hidden" id="walkUi" aria-hidden="true">
+    <div class="joy" id="joy">
+      <div class="joy-knob" id="joyKnob"></div>
+    </div>
+    <div class="walk-vert">
+      <button type="button" id="walkUp" aria-label="Fly up">Q ↑</button>
+      <button type="button" id="walkDown" aria-label="Fly down">E ↓</button>
+    </div>
+    <div class="walk-hint">WASD / arrows to walk · mouse to look · Q/E up/down · Esc to exit</div>
+  </div>
   <div id="tip" class="tip hidden"></div>
 </section>
 <script src="/pipeline.js"></script>

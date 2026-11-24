@@ -1,6 +1,17 @@
 /* Devameer Bot Pipeline — 3D virtual office. Cute chibi agents at desks, driven only by real SSE events. */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { FilmPass } from 'three/addons/postprocessing/FilmPass.js';
+import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+import { VignetteShader } from 'three/addons/shaders/VignetteShader.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
 
 const SCALE = 0.012;
 const SCREEN_W = 640;
@@ -51,11 +62,21 @@ let capRenderer = null;
 let floor, packetMesh, packetCount = 0, gridHelper, vignette, keyLight, hemiLight, fillLight, rimLight, floorGlow;
 let geos = {};
 let themeName = 'dark';
-let fly = null; // camera tween
+let fly = null;
 let closeOn = null;
 let overviewShot = null;
 let raycaster = null;
 let pointerDown = null;
+let composer = null, capComposer = null;
+let bloomPass = null, ssaoPass = null, bokehPass = null, filmPass = null, vignettePass = null, outputPass = null;
+let floorReflector = null, dust = null, dustGeo = null, lightBeams = [];
+let ptrLock = null;
+let walkOn = false, tourOn = false;
+let fxLevel = 'high';
+let fpsLowFor = 0;
+let shakeAmt = 0;
+let camShake = new THREE.Vector3();
+const walk = { keys: Object.create(null), joy: { x: 0, z: 0 }, vert: 0, look: { x: 0, y: 0 } };
 const clickables = [];
 const desks = new Map();
 const cables = [];
@@ -299,80 +320,135 @@ function clipLine(ctx, text, maxW) {
   return t + '…';
 }
 
+const FALLBACK_PROMPT = {
+  feed: ['Ingest the PumpPortal websocket: newToken, migration, and tokenTrade for open positions.', 'Refresh pump.fun lists and forward each new mint to Sentinel.'],
+  jupiter: ['Quote SOL/USD from lite-api.jup.ag, falling back to api.coingecko.com.', 'Supply the live SOL price to Watch and Broker for valuation.'],
+  rpc: ['Poll Solana RPC every 3000ms for bonding-curve state.', 'Watch at most 200 mints; emit curve ticks and surface RPC errors.'],
+  rugs: ['Reject if this creator already rugged (prior-rug set).', 'Reject if the dev holds more than 20% of supply.', 'On the sniper path, reject if non-dev buys in the first 15s exceed 30%.', 'Reject if liquidity is below 2 SOL (sniper fresh launches are exempt).'],
+  sniper: ['Select PumpPortal launches less than 60s old that already show first organic buys.', 'Require at least 0.5 SOL added to the curve since creation and a rising last tick.', 'Exits for this agent: take profit 60%, stop loss 25%, max hold 3m.'],
+  scout: ['Select live-streamed or X-linked tokens with 1h volume of at least $5,000.', 'Require curve progress between 10% and 80% and +3% momentum over 30s, still ticking up.', 'Exits for this agent: take profit 40%, stop loss 20%, max hold 10m.'],
+  curve: ['Select tokens 30–75% through the bonding curve, older than 2 minutes.', 'Require +8% momentum over 60s and a rising last tick.', 'Exits for this agent: take profit 30%, stop loss 15%, max hold 8m.'],
+  graduate: ['Select tokens 85–97% through the curve, still climbing, close to graduating.', 'Require +2% momentum over 30s and a rising last tick.', 'Exits for this agent: take profit 25%, stop loss 12%, max hold 10m.'],
+  risk: ['Allow at most 3 open positions at once.', 'Block new buys if realized loss today reaches 0.25 SOL, or if the 5x stack goal is hit.', 'Keep scanning and exits running when new buys are on hold. Enforce a 5s buy cooldown.', 'Trade size 0.02 SOL, capped at 0.05 SOL.'],
+  buy: ['Place buys at 0.02 SOL (cap 0.05 SOL) with 10% slippage.', 'Priority fee 0.0005 SOL. Paper mode when DRY_RUN is on.', 'Only buy after Oracle has cleared risk. Record the fill for Archivist and Watch.'],
+  monitor: ['Track every open position, pin those mints, and follow curve and Jupiter prices.', 'Refresh about every 3000ms and hand off exit candidates to Keeper.'],
+  exits: ['Scout: TP 40% / SL 20% / max hold 10m. Sniper: TP 60% / SL 25% / max hold 3m.', 'Rider: TP 30% / SL 15% / max hold 8m. Graduate: TP 25% / SL 12% / max hold 10m.', 'When a threshold is hit, emit the exit reason and send the position to Closer.'],
+  sell: ['Execute Keeper exit signals (take profit, stop loss, or max hold) as sells.', 'Paper mode when DRY_RUN is on. Save the close and notify Editor for a replay.'],
+  db: ['Persist trades, withdrawals, and flow events (cap 20000 events, ring 2000).', 'Record opens, closes, and withdrawal receipts from Broker, Closer, and Vault.'],
+  share: ['Build public share cards and replay MP4s for closed trades and the account.', 'Public links must never include wallet, keys, admin, or withdraw destinations.'],
+  withdraw: ['Keep a 0.005 SOL reserve. Send only to the configured withdraw address.', 'Paper withdrawals are recorded without moving live funds.'],
+  errors: ['Collect buy/sell failures, rug rejects, risk holds, and Solana RPC errors.', 'Surface the alert and keep the rest of the pipeline running.'],
+};
+
+function promptLinesFor(id) {
+  const w = world();
+  const cfg = w && w.configs && w.configs[id];
+  if (cfg && Array.isArray(cfg.prompt) && cfg.prompt.length) return cfg.prompt;
+  return FALLBACK_PROMPT[id] || [];
+}
+
 function paintScreen(entry, rows, mode, now) {
   const ctx = entry.ctx, w = SCREEN_W, h = SCREEN_H;
   const flash = entry.flashUntil && now < entry.flashUntil;
   const flashK = flash ? (entry.flashUntil - now) / 900 : 0;
-  ctx.fillStyle = flash ? mixHex('#0B1A2A', '#07070A', 1 - flashK * 0.7) : '#07070A';
+  ctx.fillStyle = flash ? mixHex('#0B1A2A', '#07070A', flashK) : '#07070A';
   ctx.fillRect(0, 0, w, h);
 
-  const headerH = 52;
-  ctx.fillStyle = '#14141A';
+  const headerH = 44;
+  ctx.fillStyle = '#12141C';
   ctx.fillRect(0, 0, w, headerH);
   const dots = ['#F43F5E', '#F59E0B', '#22C55E'];
   dots.forEach((c, i) => {
-    ctx.beginPath(); ctx.fillStyle = c; ctx.globalAlpha = 0.85;
-    ctx.arc(18 + i * 18, 16, 5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.fillStyle = c; ctx.globalAlpha = 0.9;
+    ctx.arc(18 + i * 16, 22, 5, 0, 7); ctx.fill();
   });
   ctx.globalAlpha = 1;
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillStyle = '#FAFAFA';
-  ctx.font = '800 22px Inter,system-ui,sans-serif';
+  ctx.font = '800 20px Inter,system-ui,sans-serif';
   const title = entry.title || entry.name || 'agent';
-  ctx.fillText(clipLine(ctx, title, w - 200), 72, 18);
-  ctx.fillStyle = '#A1A1AA';
-  ctx.font = '600 14px Inter,system-ui,sans-serif';
-  ctx.fillText(clipLine(ctx, entry.role || '', w - 200), 72, 38);
+  ctx.fillText(clipLine(ctx, title, w - 220), 64, 22);
   ctx.textAlign = 'right';
-  ctx.font = '700 13px ui-monospace,SFMono-Regular,Menlo,monospace';
+  ctx.font = '800 12px ui-monospace,SFMono-Regular,Menlo,monospace';
   const modeLabel = mode === 'working' ? 'LIVE' : (mode === 'blocked' ? 'BLOCKED' : (mode === 'waiting' ? 'WAIT' : 'IDLE'));
   ctx.fillStyle = mode === 'working' ? '#86EFAC' : (mode === 'blocked' ? '#FCA5A5' : (mode === 'waiting' ? '#FCD34D' : '#71717A'));
-  ctx.fillText(modeLabel, w - 16, 26);
+  ctx.fillText(modeLabel, w - 14, 22);
 
+  // System prompt block — real role instructions
+  const prompts = promptLinesFor(entry.agentId || entry.id);
   ctx.textAlign = 'left';
-  ctx.font = '700 22px ui-monospace,SFMono-Regular,Menlo,monospace';
-  const lineH = 42;
-  const top = headerH + 28;
-  const shown = (rows || []).slice(-SCREEN_LINES);
-  if (!shown.length) {
+  ctx.font = '700 11px Inter,system-ui,sans-serif';
+  ctx.fillStyle = '#4ADE80';
+  const promptTop = headerH + 8;
+  ctx.fillText('SYSTEM PROMPT', 16, promptTop + 8);
+  ctx.font = '600 14px ui-monospace,SFMono-Regular,Menlo,monospace';
+  ctx.fillStyle = '#86EFAC';
+  let py = promptTop + 28;
+  const pLineH = 18;
+  const maxPrompt = 4;
+  const shownP = (prompts || []).slice(0, maxPrompt);
+  shownP.forEach((line) => {
+    ctx.fillText(clipLine(ctx, '· ' + line, w - 28), 16, py);
+    py += pLineH;
+  });
+  const promptBoxH = 16 + 22 + shownP.length * pLineH + 8;
+  ctx.strokeStyle = 'rgba(74,222,128,0.28)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(8, headerH + 4, w - 16, promptBoxH);
+  const logTop = headerH + 4 + promptBoxH + 10;
+
+  // Prompt-style live log
+  ctx.font = '700 17px ui-monospace,SFMono-Regular,Menlo,monospace';
+  const turns = (rows || []).slice(-3);
+  const wall = Date.now();
+  let y = logTop + 16;
+  const blink = (Math.floor(now / 480) % 2) === 0;
+  if (!turns.length) {
     ctx.fillStyle = '#52525B';
-    ctx.font = '600 20px ui-monospace,SFMono-Regular,Menlo,monospace';
-    ctx.fillText('waiting for first event', 18, top);
-    const blink = (Math.floor(now / 530) % 2) === 0;
-    if (blink) { ctx.fillStyle = '#71717A'; ctx.fillRect(18, top + 16, 10, 20); }
+    ctx.fillText('waiting for first event', 16, y);
+    if (blink) { ctx.fillStyle = '#A1A1AA'; ctx.fillRect(16 + ctx.measureText('waiting for first event ').width, y - 12, 9, 18); }
   } else {
-    shown.forEach((row, i) => {
-      const yy = top + i * lineH;
-      const incoming = row.incoming && (now - (row.at || 0)) < 1600;
-      if (incoming) {
-        ctx.fillStyle = 'rgba(59,130,246,0.18)';
-        ctx.fillRect(8, yy - 22, w - 16, 36);
+    turns.forEach((row) => {
+      const input = row.input || ('> ' + (row.text || ''));
+      const think = row.think || 'processing';
+      const result = row.result || row.text || '';
+      const age = wall - (row.at || 0);
+      const liveType = age >= 0 && age < 2400;
+      let thinkShown = think, showResult = true, typing = false;
+      if (liveType) {
+        const n = Math.min(think.length, Math.max(0, Math.floor(age / 28)));
+        thinkShown = think.slice(0, n);
+        showResult = n >= think.length && age > think.length * 28 + 140;
+        typing = !showResult;
       }
-      ctx.fillStyle = row.tone || '#E4E4E7';
-      ctx.fillText(clipLine(ctx, row.text, w - 28), 18, yy);
+      if (row.incoming) {
+        ctx.fillStyle = 'rgba(59,130,246,0.16)';
+        ctx.fillRect(8, y - 16, w - 16, 22);
+      }
+      ctx.fillStyle = '#93C5FD';
+      ctx.fillText(clipLine(ctx, input, w - 28), 16, y);
+      y += 20;
+      ctx.fillStyle = '#A1A1AA';
+      const thinkLine = '  thinking: ' + thinkShown + (typing && blink ? '▋' : '');
+      ctx.fillText(clipLine(ctx, thinkLine, w - 28), 16, y);
+      y += 20;
+      if (showResult) {
+        ctx.fillStyle = row.tone || '#E4E4E7';
+        ctx.fillText(clipLine(ctx, '  ' + result, w - 28), 16, y);
+        y += 22;
+      } else {
+        y += 8;
+      }
     });
-    if (mode === 'working' && (Math.floor(now / 400) % 2) === 0) {
-      const last = shown[shown.length - 1];
-      const yy = top + (shown.length - 1) * lineH;
-      const tw = ctx.measureText(clipLine(ctx, last.text, w - 36)).width;
-      ctx.fillStyle = last.tone || '#E4E4E7';
-      ctx.fillRect(20 + tw, yy - 16, 10, 22);
+    if (blink && mode === 'working') {
+      ctx.fillStyle = '#E4E4E7';
+      ctx.fillRect(16, y - 6, 9, 18);
     }
   }
-  if (mode === 'working') {
-    const shimmer = ((now / 700) % 1);
-    const gx = shimmer * (w + 80) - 80;
-    const g = ctx.createLinearGradient(gx, 0, gx + 80, 0);
-    g.addColorStop(0, 'rgba(255,255,255,0)');
-    g.addColorStop(0.5, 'rgba(255,255,255,0.07)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, headerH, w, h - headerH);
-  }
   if (flash) {
-    ctx.strokeStyle = 'rgba(147,197,253,' + (0.25 + flashK * 0.75) + ')';
+    ctx.strokeStyle = 'rgba(147,197,253,' + (0.3 + flashK * 0.7) + ')';
     ctx.lineWidth = 8;
-    ctx.strokeRect(4, 4, w - 8, h - 8);
+    ctx.strokeRect(3, 3, w - 6, h - 6);
   }
   entry.tex.needsUpdate = true;
 }
@@ -495,6 +571,8 @@ function makeDesk(node) {
   scr.title = title;
   scr.role = node.role || node.sub || '';
   scr.name = node.name || node.id;
+  scr.agentId = node.id;
+  scr.id = node.id;
 
   return {
     root, bot, sit, chair, parts: bot.userData, screen, scr, light, tag, mon, mug, phone,
@@ -542,10 +620,10 @@ function buildScene(w) {
   controls.enablePan = true;
   controls.screenSpacePanning = true;
   controls.zoomToCursor = true;
-  controls.minDistance = 1.05;
-  controls.maxDistance = 58;
-  controls.minPolarAngle = 0.08;
-  controls.maxPolarAngle = 1.52;
+  controls.minDistance = 0.12;
+  controls.maxDistance = 220;
+  controls.minPolarAngle = 0.001;
+  controls.maxPolarAngle = Math.PI / 2 - 0.02;
   controls.target.set(0, 0.55, 0);
   controls.update();
   bindOfficePointer(canvas);
@@ -618,10 +696,13 @@ function buildScene(w) {
   packetMesh = null;
   defaultCamera();
   overviewShot = { pos: camera.position.clone(), target: controls.target.clone() };
-  applyTheme(currentTheme());
-  fillJumpMenu();
   built = true;
   resize();
+  setupImmersion();
+  applyTheme(currentTheme());
+  fillJumpMenu();
+  applyFxLevel(preferredFx());
+  resizeFx();
 }
 
 function ensureCapRenderer(W, H) {
@@ -962,6 +1043,8 @@ function stepScreens(now) {
     d.scr.title = (d.name || id) + ' · ' + (d.role || '');
     d.scr.role = d.role || '';
     d.scr.name = d.name;
+    d.scr.agentId = id;
+    d.scr.id = id;
     const last = rows[rows.length - 1];
     const key = (last ? (last.at + '|' + last.text) : 'empty') + '|' + mode + '|' + (d.scr.flashUntil && now < d.scr.flashUntil ? 'f' : '') + '|' + Math.floor(now / 500);
     if (key !== d.lastScreen || now - d.lastPaint > 500) {
@@ -985,6 +1068,10 @@ function step(now, dt) {
   stepCables(dt);
   stepScreens(now);
   stepAudio(now, dt);
+  stepWalk(dt);
+  stepTour(dt);
+  stepDust(dt);
+  autoQuality(dt);
 }
 
 function stepOnce(now, dt) {
@@ -1006,6 +1093,7 @@ function resize() {
   const pr = Math.min(isMob() ? 1.25 : 1.6, window.devicePixelRatio || 1);
   renderer.setPixelRatio(pr);
   renderer.setSize(w, h, false);
+    resizeFx();
 }
 
 function loop(ts) {
@@ -1017,7 +1105,7 @@ function loop(ts) {
   fps = fps * 0.9 + (dt > 0 ? (1 / dt) * 0.1 : 0);
   const now = (pipe() && pipe().clock && pipe().clock.now()) || ts;
   stepOnce(now, dt);
-  renderer.render(scene, camera);
+  renderFrame();
   raf = requestAnimationFrame(loop);
 }
 
@@ -1065,7 +1153,14 @@ function renderCapture(dest, W, H, now, dt) {
   camera.aspect = W / H;
   camera.updateProjectionMatrix();
   stepOnce(now, dt || 0.033);
-  cap.render(scene, camera);
+  if (fxLevel !== 'off') {
+    if (!capComposer) setupComposer(cap, true);
+    if (capComposer) {
+      const W0 = cap.domElement.width, H0 = cap.domElement.height;
+      capComposer.setSize(W0, H0);
+      try { capComposer.render(); } catch { cap.render(scene, camera); }
+    } else cap.render(scene, camera);
+  } else cap.render(scene, camera);
   camera.aspect = prevAspect;
   camera.updateProjectionMatrix();
   const ctx = dest.getContext('2d');
@@ -1150,6 +1245,7 @@ function inspect() {
     active, built, agents: desks.size, fps: Math.round(fps), modes,
     packets: packets.map((p) => ({ from: p.from, to: p.to, label: p.label, t: +p.t.toFixed(2) })),
     cables: cables.length, theme: themeName, closeOn, audio: !!(audio.ctx && audio.enabled), muted: !!audio.muted, volume: audio.volume,
+    walk: walkOn, tour: tourOn, fx: fxLevel, gains: AUDIO_GAINS,
   };
 }
 
@@ -1334,18 +1430,37 @@ function bindOfficePointer(canvas) {
 
 function onKey(e) {
   if (e.key === 'Escape' && active) {
+    if (walkOn) { setWalk(false); return; }
+    if (tourOn) { setTour(false); return; }
     flyOverview();
   }
 }
 document.addEventListener('keydown', onKey);
 
 /* ---- Web Audio: all sounds synthesized (see flow-site/AUDIO.md) ---- */
+const AUDIO_GAINS = {
+  defaultVolume: 0.9,
+  preGain: 2.4,
+  compressor: { threshold: -18, ratio: 4, knee: 6, attack: 0.003, release: 0.18 },
+  limiter: { threshold: -3, ratio: 18, knee: 0, attack: 0.001, release: 0.08 },
+  typing: [0.22, 0.32],
+  click: 0.12,
+  chime: 0.28,
+  cheer: 0.30,
+  nope: 0.22,
+  hum: 0.085,
+  ac: 0.02,
+  creak: 0.055,
+  murmur: 0.045,
+};
+
 const audio = {
-  ctx: null, master: null, dest: null, enabled: false, muted: false, volume: 0.7,
+  ctx: null, master: null, dest: null, bus: null, pre: null, comp: null, limit: null,
+  enabled: false, muted: false, volume: AUDIO_GAINS.defaultVolume,
   amb: null, lastCreak: 0, lastMurmur: 0,
 };
 try {
-  const v = localStorage.getItem('devameer-flow-volume');
+  const v = localStorage.getItem('devameer-flow-volume-v3');
   if (v != null && isFinite(+v)) audio.volume = Math.max(0, Math.min(1, +v));
   audio.muted = localStorage.getItem('devameer-flow-muted') === '1';
 } catch {}
@@ -1355,16 +1470,29 @@ function ensureAudio() {
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
   const ctx = new AC();
+  const bus = ctx.createGain();
+  bus.gain.value = 1;
+  const pre = ctx.createGain();
+  pre.gain.value = AUDIO_GAINS.preGain;
+  const comp = ctx.createDynamicsCompressor();
+  const c = AUDIO_GAINS.compressor;
+  comp.threshold.value = c.threshold; comp.ratio.value = c.ratio; comp.knee.value = c.knee;
+  comp.attack.value = c.attack; comp.release.value = c.release;
+  const limit = ctx.createDynamicsCompressor();
+  const l = AUDIO_GAINS.limiter;
+  limit.threshold.value = l.threshold; limit.ratio.value = l.ratio; limit.knee.value = l.knee;
+  limit.attack.value = l.attack; limit.release.value = l.release;
   const master = ctx.createGain();
   master.gain.value = audio.muted ? 0 : audio.volume;
+  bus.connect(pre); pre.connect(comp); comp.connect(limit); limit.connect(master);
   master.connect(ctx.destination);
   const dest = ctx.createMediaStreamDestination();
   master.connect(dest);
-  audio.ctx = ctx; audio.master = master; audio.dest = dest;
+  Object.assign(audio, { ctx, master, dest, bus, pre, comp, limit });
   return ctx;
 }
 
-function unlockAudio() {
+function unlockAudio(fromGate) {
   const ctx = ensureAudio();
   if (!ctx) return false;
   if (ctx.state === 'suspended') ctx.resume().catch(() => {});
@@ -1372,20 +1500,24 @@ function unlockAudio() {
     audio.enabled = true;
     startAmbient();
   }
+  if (fromGate || audio.enabled) {
+    const gate = document.getElementById('soundGate');
+    if (gate) gate.classList.add('hidden');
+  }
   updateAudioUi();
   return true;
 }
 
 function setVolume(v) {
   audio.volume = Math.max(0, Math.min(1, +v || 0));
-  if (audio.master) audio.master.gain.setTargetAtTime(audio.muted ? 0 : audio.volume, audio.ctx.currentTime, 0.03);
-  try { localStorage.setItem('devameer-flow-volume', String(audio.volume)); } catch {}
+  if (audio.master && audio.ctx) audio.master.gain.setTargetAtTime(audio.muted ? 0 : audio.volume, audio.ctx.currentTime, 0.03);
+  try { localStorage.setItem('devameer-flow-volume-v3', String(audio.volume)); } catch {}
   if (audio.volume > 0 && audio.muted) { audio.muted = false; try { localStorage.setItem('devameer-flow-muted', '0'); } catch {} }
   updateAudioUi();
 }
 
 function toggleMute() {
-  unlockAudio();
+  unlockAudio(true);
   audio.muted = !audio.muted;
   if (audio.master && audio.ctx) audio.master.gain.setTargetAtTime(audio.muted ? 0 : audio.volume, audio.ctx.currentTime, 0.03);
   try { localStorage.setItem('devameer-flow-muted', audio.muted ? '1' : '0'); } catch {}
@@ -1395,23 +1527,32 @@ function toggleMute() {
 function updateAudioUi() {
   const btn = document.getElementById('audioMute');
   const vol = document.getElementById('audioVol');
+  const pct = document.getElementById('audioPct');
+  const gate = document.getElementById('soundGate');
+  const label = btn && btn.querySelector('.spk-label');
   if (btn) {
-    btn.textContent = !audio.enabled ? 'Sound' : (audio.muted ? 'Muted' : 'Sound');
+    btn.classList.toggle('is-muted', !!audio.muted);
     btn.setAttribute('aria-label', audio.muted ? 'Unmute office sound' : 'Mute office sound');
+    const spk = btn.querySelector('.spk');
+    if (spk) spk.textContent = audio.muted ? '🔇' : '🔊';
+    if (label) label.textContent = audio.muted ? 'Muted' : 'Sound';
   }
-  if (vol && document.activeElement !== vol) vol.value = String(Math.round(audio.volume * 100));
+  const shown = Math.round(audio.volume * 100);
+  if (vol && document.activeElement !== vol) vol.value = String(shown);
+  if (pct) pct.textContent = shown + '%';
+  if (gate && audio.enabled) gate.classList.add('hidden');
 }
 
 function deskPanner(d) {
-  if (!audio.ctx || !audio.master) return null;
+  if (!audio.ctx || !audio.bus) return null;
   if (d.panner && d.panner.context === audio.ctx) return d.panner;
   const p = audio.ctx.createPanner();
   p.panningModel = 'HRTF';
   p.distanceModel = 'inverse';
-  p.refDistance = 3;
-  p.maxDistance = 30;
-  p.rolloffFactor = 1.15;
-  p.connect(audio.master);
+  p.refDistance = 6;
+  p.maxDistance = 42;
+  p.rolloffFactor = 0.7;
+  p.connect(audio.bus);
   d.panner = p;
   const pos = d.root.position;
   if (p.positionX) { p.positionX.value = pos.x; p.positionY.value = pos.y + 0.8; p.positionZ.value = pos.z; }
@@ -1444,7 +1585,7 @@ function typeKey(d) {
     f.type = 'bandpass';
     f.frequency.value = 1800 + Math.random() * 2200;
     f.Q.value = 1.6;
-    g.gain.value = 0.07 + Math.random() * 0.04;
+    g.gain.value = AUDIO_GAINS.typing[0] + Math.random() * (AUDIO_GAINS.typing[1] - AUDIO_GAINS.typing[0]);
     g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.03);
     f.connect(g); g.connect(p);
     envNoise(0.03, f);
@@ -1456,7 +1597,7 @@ function playClick(d) {
     const o = ctx.createOscillator();
     const g = ctx.createGain();
     o.type = 'square'; o.frequency.value = 600 + Math.random() * 200;
-    g.gain.value = 0.03;
+    g.gain.value = AUDIO_GAINS.click;
     g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.04);
     o.connect(g); g.connect(p); o.start(); o.stop(ctx.currentTime + 0.05);
   });
@@ -1471,7 +1612,7 @@ function playChime(d) {
       o.type = 'sine'; o.frequency.value = freq;
       g.gain.value = 0.0001;
       g.gain.setValueAtTime(0.0001, now + i * 0.05);
-      g.gain.exponentialRampToValueAtTime(0.07, now + i * 0.05 + 0.02);
+      g.gain.exponentialRampToValueAtTime(AUDIO_GAINS.chime, now + i * 0.05 + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.05 + 0.45);
       o.connect(g); g.connect(p); o.start(now + i * 0.05); o.stop(now + i * 0.05 + 0.5);
     });
@@ -1479,6 +1620,8 @@ function playChime(d) {
 }
 
 function playCheer(d) {
+  shakeAmt = Math.max(shakeAmt, 0.085);
+  flashScreen(0.22);
   playAt(d, (ctx, p) => {
     const now = ctx.currentTime;
     [523, 659, 784, 1046].forEach((freq, i) => {
@@ -1487,7 +1630,7 @@ function playCheer(d) {
       o.type = 'triangle'; o.frequency.value = freq;
       g.gain.value = 0.0001;
       g.gain.setValueAtTime(0.0001, now + i * 0.07);
-      g.gain.exponentialRampToValueAtTime(0.08, now + i * 0.07 + 0.03);
+      g.gain.exponentialRampToValueAtTime(AUDIO_GAINS.cheer, now + i * 0.07 + 0.03);
       g.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.07 + 0.35);
       o.connect(g); g.connect(p); o.start(now + i * 0.07); o.stop(now + i * 0.07 + 0.4);
     });
@@ -1500,7 +1643,7 @@ function playNope(d) {
     const g = ctx.createGain();
     o.type = 'sawtooth'; o.frequency.value = 220;
     o.frequency.exponentialRampToValueAtTime(90, ctx.currentTime + 0.28);
-    g.gain.value = 0.05;
+    g.gain.value = AUDIO_GAINS.nope;
     g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.32);
     const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 600;
     o.connect(f); f.connect(g); g.connect(p); o.start(); o.stop(ctx.currentTime + 0.34);
@@ -1510,6 +1653,7 @@ function playNope(d) {
 function startAmbient() {
   if (!audio.ctx || audio.amb) return;
   const ctx = audio.ctx;
+  const dest = audio.bus || audio.master;
   const hum = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
   const data = hum.getChannelData(0);
   let b = 0;
@@ -1517,13 +1661,13 @@ function startAmbient() {
   const src = ctx.createBufferSource();
   src.buffer = hum; src.loop = true;
   const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 140;
-  const g = ctx.createGain(); g.gain.value = 0.035;
-  src.connect(f); f.connect(g); g.connect(audio.master);
+  const g = ctx.createGain(); g.gain.value = AUDIO_GAINS.hum;
+  src.connect(f); f.connect(g); g.connect(dest);
   src.start();
   const ac = ctx.createOscillator();
   ac.type = 'sine'; ac.frequency.value = 58;
-  const acg = ctx.createGain(); acg.gain.value = 0.006;
-  ac.connect(acg); acg.connect(audio.master); ac.start();
+  const acg = ctx.createGain(); acg.gain.value = AUDIO_GAINS.ac;
+  ac.connect(acg); acg.connect(dest); ac.start();
   audio.amb = { src, ac, lastCreak: ctx.currentTime + 4 + Math.random() * 8 };
 }
 
@@ -1541,9 +1685,9 @@ function maybeAmbience(now) {
     o.frequency.value = 140 + Math.random() * 80;
     o.frequency.exponentialRampToValueAtTime(70 + Math.random() * 40, t + 0.35);
     f.type = 'bandpass'; f.frequency.value = 200; f.Q.value = 1.2;
-    g.gain.value = 0.018;
+    g.gain.value = AUDIO_GAINS.creak;
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
-    o.connect(f); f.connect(g); g.connect(audio.master);
+    o.connect(f); f.connect(g); g.connect(audio.bus || audio.master);
     o.start(); o.stop(t + 0.42);
   }
   if (t > (audio.lastMurmur || 0)) {
@@ -1551,9 +1695,9 @@ function maybeAmbience(now) {
     const g = ctx.createGain();
     const f = ctx.createBiquadFilter();
     f.type = 'bandpass'; f.frequency.value = 400 + Math.random() * 500; f.Q.value = 2;
-    g.gain.value = 0.012;
+    g.gain.value = AUDIO_GAINS.murmur;
     g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
-    f.connect(g); g.connect(audio.master);
+    f.connect(g); g.connect(audio.bus || audio.master);
     envNoise(1.1, f);
   }
 }
@@ -1599,8 +1743,6 @@ function audioCaptureStream() {
   return audio.dest.stream;
 }
 
-document.addEventListener('pointerdown', () => { unlockAudio(); }, { capture: true });
-document.addEventListener('keydown', () => { unlockAudio(); }, { capture: true });
 
 document.addEventListener('visibilitychange', () => {
   hidden = document.hidden;
@@ -1611,11 +1753,413 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('resize', () => { if (active) resize(); });
 
+
+function preferredFx() {
+  try { return localStorage.getItem('devameer-flow-fx') || (isMob() ? 'low' : 'high'); }
+  catch { return isMob() ? 'low' : 'high'; }
+}
+
+function setupImmersion() {
+  // Desk monitor glow lamps
+  for (const d of desks.values()) {
+    if (d.lampLight) continue;
+    const pl = new THREE.PointLight(d.color || '#ffe7b0', 0.6, 2.0, 2);
+    pl.position.set(0.1, 1.02, 0.4);
+    d.root.add(pl);
+    d.lampLight = pl;
+  }
+  // Reflective floor
+  if (!floorReflector) {
+    try {
+      floorReflector = new Reflector(new THREE.CircleGeometry(28, 64), {
+        clipBias: 0.003,
+        textureWidth: 512,
+        textureHeight: 512,
+        color: 0x7a8796,
+      });
+      floorReflector.rotation.x = -Math.PI / 2;
+      floorReflector.position.y = 0.004;
+      scene.add(floorReflector);
+    } catch (e) { console.warn('reflector', e); }
+  }
+  // Dust motes
+  if (!dust) {
+    const n = 280;
+    dustGeo = new THREE.BufferGeometry();
+    const pos = new Float32Array(n * 3);
+    const vel = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 28;
+      pos[i * 3 + 1] = 0.2 + Math.random() * 6;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 20;
+      vel[i * 3] = (Math.random() - 0.5) * 0.15;
+      vel[i * 3 + 1] = 0.02 + Math.random() * 0.08;
+      vel[i * 3 + 2] = (Math.random() - 0.5) * 0.15;
+    }
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    dustGeo.userData.vel = vel;
+    dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({
+      color: '#E2E8F0', size: 0.035, transparent: true, opacity: 0.35, depthWrite: false,
+    }));
+    scene.add(dust);
+  }
+  // Soft volumetric window beams
+  if (!lightBeams.length) {
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: '#F8E7C3', transparent: true, opacity: 0.045, depthWrite: false, side: THREE.DoubleSide,
+    });
+    [[-6, 9, -2], [4, 9, 1], [0, 10, -5]].forEach(([x, y, z], i) => {
+      const g = new THREE.ConeGeometry(2.4 + i * 0.3, 10, 16, 1, true);
+      const m = new THREE.Mesh(g, beamMat.clone());
+      m.position.set(x, y - 5, z);
+      m.rotation.z = 0.15 - i * 0.08;
+      m.rotation.x = 0.12;
+      scene.add(m);
+      lightBeams.push(m);
+    });
+  }
+  setupComposer(renderer, false);
+  bindWalk();
+  ensureFlashEl();
+}
+
+function setupComposer(r, isCap) {
+  if (!r || !scene || !camera) return null;
+  const w = r.domElement.width || 800, h = r.domElement.height || 450;
+  const comp = new EffectComposer(r);
+  comp.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.55, 0.72);
+  comp.addPass(bloom);
+  if (!isCap && !isMob()) {
+    try {
+      const ssao = new SSAOPass(scene, camera, w, h);
+      ssao.kernelRadius = 8;
+      ssao.minDistance = 0.001;
+      ssao.maxDistance = 0.12;
+      ssao.output = SSAOPass.OUTPUT ? SSAOPass.OUTPUT.Default : 0;
+      comp.addPass(ssao);
+      if (!isCap) ssaoPass = ssao;
+    } catch (e) { console.warn('ssao', e); }
+  }
+  if (!isCap) {
+    try {
+      const bokeh = new BokehPass(scene, camera, { focus: 4.5, aperture: 0.00018, maxblur: 0.008 });
+      bokeh.enabled = false;
+      comp.addPass(bokeh);
+      bokehPass = bokeh;
+    } catch (e) { console.warn('bokeh', e); }
+  }
+  const vig = new ShaderPass(VignetteShader);
+  vig.uniforms.offset.value = 0.85;
+  vig.uniforms.darkness.value = 0.85;
+  comp.addPass(vig);
+  const film = new FilmPass(0.12, false);
+  comp.addPass(film);
+  comp.addPass(new OutputPass());
+  if (isCap) {
+    capComposer = comp;
+  } else {
+    composer = comp;
+    bloomPass = bloom;
+    vignettePass = vig;
+    filmPass = film;
+  }
+  return comp;
+}
+
+function applyFxLevel(level) {
+  const allowed = { high: 1, low: 1, off: 1 };
+  fxLevel = allowed[level] ? level : 'high';
+  try { localStorage.setItem('devameer-flow-fx', fxLevel); } catch {}
+  const high = fxLevel === 'high';
+  const low = fxLevel === 'low';
+  const on = fxLevel !== 'off';
+  if (bloomPass) bloomPass.strength = high ? 0.55 : (low ? 0.28 : 0);
+  if (ssaoPass) ssaoPass.enabled = high && !isMob();
+  if (bokehPass) bokehPass.enabled = high && !!closeOn;
+  if (filmPass) filmPass.enabled = on;
+  if (vignettePass) vignettePass.enabled = on;
+  if (floorReflector) floorReflector.visible = high;
+  if (dust) dust.visible = on;
+  lightBeams.forEach((m) => { m.visible = on; m.material.opacity = high ? 0.05 : 0.028; });
+  for (const d of desks.values()) {
+    if (d.lampLight) d.lampLight.visible = on;
+    if (d.lampLight) d.lampLight.intensity = high ? 0.7 : 0.35;
+  }
+  const btn = document.getElementById('fxToggle');
+  if (btn) {
+    btn.textContent = 'FX ' + (fxLevel === 'off' ? 'Off' : (fxLevel === 'low' ? 'Low' : 'High'));
+    btn.setAttribute('aria-label', 'Cinematic FX: ' + fxLevel);
+  }
+}
+
+function cycleFx() {
+  applyFxLevel(fxLevel === 'high' ? 'low' : (fxLevel === 'low' ? 'off' : 'high'));
+}
+
+function autoQuality(dt) {
+  if (fxLevel === 'off') return;
+  if (fps && fps < 28) fpsLowFor += dt;
+  else fpsLowFor = Math.max(0, fpsLowFor - dt * 0.5);
+  if (fpsLowFor > 2.2) {
+    fpsLowFor = 0;
+    if (fxLevel === 'high') applyFxLevel('low');
+    else if (fxLevel === 'low') applyFxLevel('off');
+  }
+}
+
+function stepDust(dt) {
+  if (!dust || !dust.visible || !dustGeo) return;
+  const pos = dustGeo.attributes.position.array;
+  const vel = dustGeo.userData.vel;
+  for (let i = 0; i < pos.length; i += 3) {
+    pos[i] += vel[i] * dt;
+    pos[i + 1] += vel[i + 1] * dt;
+    pos[i + 2] += vel[i + 2] * dt;
+    if (pos[i + 1] > 7) pos[i + 1] = 0.15;
+    if (pos[i] > 14) pos[i] = -14;
+    if (pos[i] < -14) pos[i] = 14;
+    if (pos[i + 2] > 10) pos[i + 2] = -10;
+    if (pos[i + 2] < -10) pos[i + 2] = 10;
+  }
+  dustGeo.attributes.position.needsUpdate = true;
+}
+
+function ensureFlashEl() {
+  if (document.getElementById('fxFlash')) return;
+  const el = document.createElement('div');
+  el.id = 'fxFlash';
+  el.style.cssText = 'position:absolute;inset:0;z-index:7;pointer-events:none;background:#fff;opacity:0;transition:opacity .12s linear;';
+  const wrap = document.getElementById('wrap');
+  if (wrap) wrap.appendChild(el);
+}
+
+function flashScreen(amt) {
+  const el = document.getElementById('fxFlash');
+  if (!el) return;
+  el.style.opacity = String(Math.max(0.08, Math.min(0.35, amt || 0.2)));
+  setTimeout(() => { el.style.opacity = '0'; }, 90);
+}
+
+function renderFrame(which) {
+  const useCap = which === 'cap';
+  const r = useCap ? capRenderer : renderer;
+  if (!r) return;
+  // camera shake offset
+  if (shakeAmt > 0.001 && camera) {
+    camShake.set((Math.random() - 0.5) * shakeAmt, (Math.random() - 0.5) * shakeAmt * 0.6, (Math.random() - 0.5) * shakeAmt);
+    camera.position.add(camShake);
+    shakeAmt *= 0.84;
+  } else {
+    camShake.set(0, 0, 0);
+  }
+  if (bokehPass && !useCap) bokehPass.enabled = fxLevel === 'high' && !!closeOn;
+  const comp = useCap ? capComposer : composer;
+  if (fxLevel !== 'off' && comp) {
+    try { comp.render(); }
+    catch (e) { r.render(scene, camera); }
+  } else {
+    r.render(scene, camera);
+  }
+  if (camShake.x || camShake.y || camShake.z) camera.position.sub(camShake);
+}
+
+function bindWalk() {
+  if (bindWalk._done) return;
+  bindWalk._done = true;
+  const down = (e) => {
+    walk.keys[e.code] = true;
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') walk.keys.sprint = true;
+  };
+  const up = (e) => {
+    walk.keys[e.code] = false;
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') walk.keys.sprint = false;
+  };
+  document.addEventListener('keydown', down);
+  document.addEventListener('keyup', up);
+  const canvas = document.getElementById('cv3d');
+  if (canvas) {
+    canvas.addEventListener('click', () => {
+      if (walkOn && ptrLock && !ptrLock.isLocked && !isMob()) {
+        try { ptrLock.lock(); } catch {}
+      }
+    });
+  }
+  const joy = document.getElementById('joy');
+  if (joy) {
+    const setFrom = (e) => {
+      const r = joy.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width * 2 - 1;
+      const y = (e.clientY - r.top) / r.height * 2 - 1;
+      walk.joy.x = Math.max(-1, Math.min(1, x));
+      walk.joy.z = Math.max(-1, Math.min(1, y));
+      const knob = document.getElementById('joyKnob');
+      if (knob) knob.style.transform = 'translate(' + (walk.joy.x * 28) + 'px,' + (walk.joy.z * 28) + 'px)';
+    };
+    const clear = () => {
+      walk.joy.x = 0; walk.joy.z = 0;
+      const knob = document.getElementById('joyKnob');
+      if (knob) knob.style.transform = '';
+    };
+    joy.addEventListener('pointerdown', (e) => { joy.setPointerCapture(e.pointerId); setFrom(e); });
+    joy.addEventListener('pointermove', (e) => { if (joy.hasPointerCapture(e.pointerId)) setFrom(e); });
+    joy.addEventListener('pointerup', clear);
+    joy.addEventListener('pointercancel', clear);
+  }
+  const upBtn = document.getElementById('walkUp');
+  const downBtn = document.getElementById('walkDown');
+  const hold = (el, dir) => {
+    if (!el) return;
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); walk.vert = dir; });
+    el.addEventListener('pointerup', () => { if (walk.vert === dir) walk.vert = 0; });
+    el.addEventListener('pointerleave', () => { if (walk.vert === dir) walk.vert = 0; });
+  };
+  hold(upBtn, 1); hold(downBtn, -1);
+}
+
+function setWalk(on) {
+  walkOn = !!on;
+  if (walkOn && tourOn) setTour(false);
+  if (walkOn) {
+    if (controls) controls.enabled = false;
+    if (!ptrLock && camera) {
+      const canvas = document.getElementById('cv3d');
+      ptrLock = new PointerLockControls(camera, canvas || document.body);
+    }
+    if (camera.position.y < 0.7) camera.position.y = 1.05;
+    if (camera.position.y > 12) camera.position.y = 1.2;
+  } else {
+    if (ptrLock && ptrLock.isLocked) { try { ptrLock.unlock(); } catch {} }
+    if (controls) {
+      controls.enabled = true;
+      const fwd = new THREE.Vector3();
+      camera.getWorldDirection(fwd);
+      controls.target.copy(camera.position).add(fwd.multiplyScalar(3));
+      controls.update();
+    }
+  }
+  const ui = document.getElementById('walkUi');
+  if (ui) ui.classList.toggle('hidden', !walkOn);
+  const btn = document.getElementById('walkToggle');
+  if (btn) {
+    btn.textContent = walkOn ? 'Exit walk' : 'Walk';
+    btn.setAttribute('aria-pressed', walkOn ? 'true' : 'false');
+  }
+}
+
+function toggleWalk() { setWalk(!walkOn); }
+
+function stepWalk(dt) {
+  if (!walkOn || !camera) return;
+  const k = walk.keys;
+  let x = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0) + walk.joy.x;
+  let z = (k.KeyS || k.ArrowDown ? 1 : 0) - (k.KeyW || k.ArrowUp ? 1 : 0) + walk.joy.z;
+  let y = (k.KeyQ || k.PageUp ? 1 : 0) - (k.KeyE || k.PageDown ? 1 : 0) + walk.vert;
+  const len = Math.hypot(x, z);
+  if (len > 1) { x /= len; z /= len; }
+  const speed = (k.sprint ? 7.6 : 4.4) * dt;
+  const euler = new THREE.Euler(0, camera.rotation.y, 0, 'YXZ');
+  const forward = new THREE.Vector3(0, 0, -1).applyEuler(euler);
+  const right = new THREE.Vector3(1, 0, 0).applyEuler(euler);
+  camera.position.addScaledVector(right, x * speed);
+  camera.position.addScaledVector(forward, -z * speed);
+  camera.position.y += y * speed;
+  camera.position.y = Math.max(0.42, Math.min(14, camera.position.y));
+  if (ptrLock && ptrLock.isLocked) {
+    // PointerLockControls already applied mouse look
+  }
+}
+
+function setTour(on) {
+  tourOn = !!on;
+  if (tourOn && walkOn) setWalk(false);
+  const btn = document.getElementById('tourToggle');
+  if (btn) {
+    btn.textContent = tourOn ? 'Stop tour' : 'Tour';
+    btn.setAttribute('aria-pressed', tourOn ? 'true' : 'false');
+  }
+  if (tourOn) tourNext(true);
+}
+
+function toggleTour() { setTour(!tourOn); }
+
+function tourNext(immediate) {
+  if (!tourOn) return;
+  if (packets.length) {
+    const p = packets[packets.length - 1];
+    const dest = desks.get(p.to);
+    if (dest) { flyToAgent(p.to, { readable: true, dur: immediate ? 0.4 : 1.4 }); return; }
+  }
+  let busy = null;
+  for (const d of desks.values()) {
+    if (d.anim && (d.anim.mode === 'work' || d.anim.mode === 'celebrate') && performance.now() < d.anim.until) { busy = d; break; }
+  }
+  if (!busy) {
+    const list = [...desks.values()];
+    busy = list[Math.floor(Date.now() / 7000) % list.length];
+  }
+  if (busy) flyToAgent(busy.id, { readable: true, dur: immediate ? 0.5 : 1.6 });
+}
+
+let tourWait = 0;
+function stepTour(dt) {
+  if (!tourOn) return;
+  if (fly) { tourWait = 0; return; }
+  tourWait += dt;
+  if (packets.length && tourWait > 0.4) { tourNext(); tourWait = 0; }
+  else if (tourWait > 4.5) { tourNext(); tourWait = 0; }
+}
+
+function onDoubleClick(e) {
+  if (!camera || !raycaster) { flyOverview(); return; }
+  const canvas = document.getElementById('cv3d');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera({ x, y }, camera);
+  const objs = [...clickables.filter((o) => o && o.parent)];
+  if (floor) objs.push(floor);
+  if (floorReflector) objs.push(floorReflector);
+  const hits = raycaster.intersectObjects(objs, true);
+  if (!hits.length) { flyOverview(); return; }
+  const hit = hits[0];
+  let o = hit.object, id = null;
+  while (o && !id) { id = o.userData && o.userData.agentId; o = o.parent; }
+  if (id) { flyToAgent(id); return; }
+  const pt = hit.point.clone();
+  const pos = pt.clone();
+  pos.y = Math.max(1.05, pt.y + 1.05);
+  pos.add(new THREE.Vector3(0.8, 0.2, 1.1));
+  if (walkOn) {
+    camera.position.copy(pos);
+    camera.lookAt(pt);
+  } else {
+    startFly(pos, pt, 0.7);
+  }
+}
+
+function resizeFx() {
+  const wrap = document.getElementById('wrap');
+  if (!wrap) return;
+  const r = wrap.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(r.width));
+  const h = Math.max(1, Math.floor(r.height));
+  const pr = Math.min(isMob() ? 1.25 : 1.6, window.devicePixelRatio || 1);
+  if (composer) composer.setSize(w, h);
+  if (bloomPass && bloomPass.setSize) bloomPass.setSize(w * pr, h * pr);
+  if (ssaoPass && ssaoPass.setSize) ssaoPass.setSize(w, h);
+}
+
 window.DevameerOffice = {
   attach, setActive, isActive: () => active, renderCapture, endCapture,
   onEvent, inspect, resize, defaultCamera, lookAtAgent,
   flyToAgent, flyOverview, setTheme: applyTheme, supported: hasWebGL,
   unlockAudio, setVolume, toggleMute, audioCaptureStream,
+  toggleWalk, setWalk, isWalk: () => walkOn,
+  toggleTour, setTour, isTour: () => tourOn,
+  cycleFx, applyFxLevel, onDoubleClick,
+  audioGains: () => ({ ...AUDIO_GAINS, master: audio.volume, muted: audio.muted, enabled: audio.enabled }),
 };
 
 (function boot() {

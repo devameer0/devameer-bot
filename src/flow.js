@@ -201,48 +201,165 @@ async function historyAsync(opts = {}) {
   return list.filter((e) => matchesEvent(e, opts)).slice(-lim);
 }
 
+function agentBook() {
+  try { return require('./engine').AGENTS || {}; } catch { return {}; }
+}
+
+function nodePrompt(id) {
+  const { engine } = ctx;
+  const s = (engine && engine.settings) || {};
+  const ag = agentBook();
+  const tp = (k) => ag[k] ? Math.round(ag[k].tp * 100) : null;
+  const sl = (k) => ag[k] ? Math.round(ag[k].sl * 100) : null;
+  const hold = (k) => ag[k] && ag[k].maxHoldMs ? Math.round(ag[k].maxHoldMs / 60000) : null;
+  const rugsMarked = engine && engine.rugCreators ? engine.rugCreators.size : 0;
+  switch (id) {
+    case 'feed':
+      return [
+        'Ingest the PumpPortal websocket: newToken, migration, and tokenTrade for open positions.',
+        'Refresh pump.fun lists and forward each new mint to Sentinel.',
+      ];
+    case 'jupiter':
+      return [
+        'Quote SOL/USD from lite-api.jup.ag, falling back to api.coingecko.com.',
+        'Supply the live SOL price to Watch and Broker for valuation.',
+      ];
+    case 'rpc':
+      return [
+        `Poll Solana RPC every ${cfg.POLL_MS}ms for bonding-curve state.`,
+        `Watch at most ${cfg.WATCH_MAX} mints; emit curve ticks and surface RPC errors.`,
+      ];
+    case 'rugs':
+      return [
+        `Reject if this creator already rugged (${rugsMarked} prior-rug creator${rugsMarked === 1 ? '' : 's'} marked).`,
+        `Reject if the dev holds more than ${cfg.MAX_DEV_PCT}% of supply.`,
+        `On the sniper path, reject if non-dev buys in the first 15s exceed ${cfg.MAX_BUNDLE_PCT}%.`,
+        `Reject if liquidity is below ${cfg.MIN_LIQ_SOL} SOL (sniper fresh launches are exempt).`,
+      ];
+    case 'sniper':
+      return [
+        'Select PumpPortal launches less than 60s old that already show first organic buys.',
+        'Require at least 0.5 SOL added to the curve since creation and a rising last tick.',
+        `Exits for this agent: take profit ${tp('sniper')}%, stop loss ${sl('sniper')}%, max hold ${hold('sniper')}m.`,
+      ];
+    case 'scout':
+      return [
+        'Select live-streamed or X-linked tokens with 1h volume of at least $5,000.',
+        'Require curve progress between 10% and 80% and +3% momentum over 30s, still ticking up.',
+        `Exits for this agent: take profit ${tp('scout')}%, stop loss ${sl('scout')}%, max hold ${hold('scout')}m.`,
+      ];
+    case 'curve':
+      return [
+        'Select tokens 30–75% through the bonding curve, older than 2 minutes.',
+        'Require +8% momentum over 60s and a rising last tick.',
+        `Exits for this agent: take profit ${tp('curve')}%, stop loss ${sl('curve')}%, max hold ${hold('curve')}m.`,
+      ];
+    case 'graduate':
+      return [
+        'Select tokens 85–97% through the curve, still climbing, close to graduating.',
+        'Require +2% momentum over 30s and a rising last tick.',
+        `Exits for this agent: take profit ${tp('graduate')}%, stop loss ${sl('graduate')}%, max hold ${hold('graduate')}m.`,
+      ];
+    case 'risk':
+      return [
+        `Allow at most ${cfg.MAX_OPEN_POSITIONS} open positions at once.`,
+        `Block new buys if realized loss today reaches ${cfg.DAILY_LOSS_LIMIT_SOL} SOL, or if the ${s.goal || cfg.GOAL_MULTIPLE}x stack goal is hit.`,
+        'Keep scanning and exits running when new buys are on hold. Enforce a 5s buy cooldown.',
+        `Trade size ${s.tradeSize || cfg.TRADE_SIZE_SOL} SOL, capped at ${cfg.MAX_SOL_PER_TRADE} SOL.`,
+      ];
+    case 'buy':
+      return [
+        `Place buys at ${s.tradeSize || cfg.TRADE_SIZE_SOL} SOL (cap ${cfg.MAX_SOL_PER_TRADE} SOL) with ${s.slippage || cfg.SLIPPAGE_PCT}% slippage.`,
+        `Priority fee ${(s.priorityFee != null ? s.priorityFee : cfg.PRIORITY_FEE_SOL)} SOL. Paper mode when DRY_RUN is on.`,
+        'Only buy after Oracle has cleared risk. Record the fill for Archivist and Watch.',
+      ];
+    case 'monitor':
+      return [
+        'Track every open position, pin those mints, and follow curve and Jupiter prices.',
+        `Refresh about every ${cfg.POLL_MS}ms and hand off exit candidates to Keeper.`,
+      ];
+    case 'exits':
+      return [
+        `Scout: TP ${tp('scout')}% / SL ${sl('scout')}% / max hold ${hold('scout')}m. Sniper: TP ${tp('sniper')}% / SL ${sl('sniper')}% / max hold ${hold('sniper')}m.`,
+        `Rider: TP ${tp('curve')}% / SL ${sl('curve')}% / max hold ${hold('curve')}m. Graduate: TP ${tp('graduate')}% / SL ${sl('graduate')}% / max hold ${hold('graduate')}m.`,
+        'When a threshold is hit, emit the exit reason and send the position to Closer.',
+      ];
+    case 'sell':
+      return [
+        'Execute Keeper exit signals (take profit, stop loss, or max hold) as sells.',
+        'Paper mode when DRY_RUN is on. Save the close and notify Editor for a replay.',
+      ];
+    case 'db':
+      return [
+        `Persist trades, withdrawals, and flow events (cap ${DB_CAP} events, ring ${RING_MAX}).`,
+        'Record opens, closes, and withdrawal receipts from Broker, Closer, and Vault.',
+      ];
+    case 'share':
+      return [
+        'Build public share cards and replay MP4s for closed trades and the account.',
+        'Public links must never include wallet, keys, admin, or withdraw destinations.',
+      ];
+    case 'withdraw':
+      return [
+        `Keep a ${cfg.WITHDRAW_RESERVE_SOL} SOL reserve. Send only to the configured withdraw address.`,
+        'Paper withdrawals are recorded without moving live funds.',
+      ];
+    case 'errors':
+      return [
+        'Collect buy/sell failures, rug rejects, risk holds, and Solana RPC errors.',
+        'Surface the alert and keep the rest of the pipeline running.',
+      ];
+    default:
+      return [];
+  }
+}
+
+function withPrompt(id, obj) {
+  return Object.assign({ prompt: nodePrompt(id) }, obj || {});
+}
+
 function nodeConfig(id) {
   const { engine, market, trader } = ctx;
-  if (!engine || !market) return {};
+  if (!engine || !market) return withPrompt(id);
   const s = engine.settings || {};
   const a = engine.constructor === Object ? null : require('./engine').AGENTS;
   const agents = a || {};
   switch (id) {
     case 'feed':
-      return { source: 'wss://pumpportal.fun/api/data', subscribed: ['newToken', 'migration', 'tokenTrade (open positions)'], connected: !!market.stats.wsConnected, newTokens: market.stats.newTokens, migrations: market.stats.migrations, listPulls: market.stats.apiLists, lastNewTokenAt: market.stats.lastNewTokenAt || 0 };
+      return withPrompt(id, { source: 'wss://pumpportal.fun/api/data', subscribed: ['newToken', 'migration', 'tokenTrade (open positions)'], connected: !!market.stats.wsConnected, newTokens: market.stats.newTokens, migrations: market.stats.migrations, listPulls: market.stats.apiLists, lastNewTokenAt: market.stats.lastNewTokenAt || 0 });
     case 'jupiter':
-      return { solUsd: market.solUsd || 0, lastAt: market.solUsdAt || 0, sources: ['lite-api.jup.ag', 'api.coingecko.com'] };
+      return withPrompt(id, { solUsd: market.solUsd || 0, lastAt: market.solUsdAt || 0, sources: ['lite-api.jup.ag', 'api.coingecko.com'] });
     case 'rpc':
-      return { pollMs: cfg.POLL_MS, watchMax: cfg.WATCH_MAX, watching: market.watchList().length, tracked: market.tokens.size, curvePolls: market.stats.curvePolls, rpcErrors: market.stats.rpcErrors, lastPollAt: market.stats.lastPollAt || 0 };
+      return withPrompt(id, { pollMs: cfg.POLL_MS, watchMax: cfg.WATCH_MAX, watching: market.watchList().length, tracked: market.tokens.size, curvePolls: market.stats.curvePolls, rpcErrors: market.stats.rpcErrors, lastPollAt: market.stats.lastPollAt || 0 });
     case 'rugs':
-      return { maxDevPct: cfg.MAX_DEV_PCT, maxBundlePct: cfg.MAX_BUNDLE_PCT, minLiqSol: cfg.MIN_LIQ_SOL, priorRugCreators: engine.rugCreators.size };
+      return withPrompt(id, { maxDevPct: cfg.MAX_DEV_PCT, maxBundlePct: cfg.MAX_BUNDLE_PCT, minLiqSol: cfg.MIN_LIQ_SOL, priorRugCreators: engine.rugCreators.size });
     case 'sniper':
     case 'scout':
     case 'curve':
     case 'graduate': {
       const ag = agents[id] || {};
-      return { enabled: !!(s.agents && s.agents[id]), takeProfit: ag.tp, stopLoss: ag.sl, maxHoldMin: ag.maxHoldMs ? ag.maxHoldMs / 60000 : null, desc: ag.desc || '' };
+      return withPrompt(id, { enabled: !!(s.agents && s.agents[id]), takeProfit: ag.tp, stopLoss: ag.sl, maxHoldMin: ag.maxHoldMs ? ag.maxHoldMs / 60000 : null, desc: ag.desc || '' });
     }
     case 'risk':
-      return { maxOpen: cfg.MAX_OPEN_POSITIONS, dailyLossLimitSol: cfg.DAILY_LOSS_LIMIT_SOL, tradeSizeSol: s.tradeSize, maxSolPerTrade: cfg.MAX_SOL_PER_TRADE, buyCooldownMs: 5000, goal: s.goal, goalHold: !!engine.goalHold, dailyLossHit: !!engine.dailyLossHit(), open: engine.open().length, running: !!engine.running };
+      return withPrompt(id, { maxOpen: cfg.MAX_OPEN_POSITIONS, dailyLossLimitSol: cfg.DAILY_LOSS_LIMIT_SOL, tradeSizeSol: s.tradeSize, maxSolPerTrade: cfg.MAX_SOL_PER_TRADE, buyCooldownMs: 5000, goal: s.goal, goalHold: !!engine.goalHold, dailyLossHit: !!engine.dailyLossHit(), open: engine.open().length, running: !!engine.running });
     case 'buy':
-      return { paper: !trader.live, dryRun: !!cfg.DRY_RUN, tradeSizeSol: s.tradeSize, slippagePct: s.slippage, priorityFeeSol: s.priorityFee };
+      return withPrompt(id, { paper: !trader.live, dryRun: !!cfg.DRY_RUN, tradeSizeSol: s.tradeSize, slippagePct: s.slippage, priorityFeeSol: s.priorityFee });
     case 'monitor':
-      return { open: engine.open().length, pinned: market.pinned.size, pollMs: cfg.POLL_MS };
+      return withPrompt(id, { open: engine.open().length, pinned: market.pinned.size, pollMs: cfg.POLL_MS });
     case 'exits':
-      return { agents: Object.fromEntries(Object.entries(agents).map(([k, v]) => [k, { tp: v.tp, sl: v.sl, maxHoldMin: v.maxHoldMs / 60000 }])) };
+      return withPrompt(id, { agents: Object.fromEntries(Object.entries(agents).map(([k, v]) => [k, { tp: v.tp, sl: v.sl, maxHoldMin: v.maxHoldMs / 60000 }])) });
     case 'sell':
-      return { paper: !trader.live, dryRun: !!cfg.DRY_RUN };
+      return withPrompt(id, { paper: !trader.live, dryRun: !!cfg.DRY_RUN });
     case 'db':
-      return { kind: store.get()?.kind || 'unknown', schema: store.get()?.schema || null, eventCap: DB_CAP, ring: RING_MAX };
+      return withPrompt(id, { kind: store.get()?.kind || 'unknown', schema: store.get()?.schema || null, eventCap: DB_CAP, ring: RING_MAX });
     case 'share':
-      return { publicRoutes: ['/share/trade/:id', '/share/trade/:id.png', '/share/trade/:id.mp4', '/share/account'], note: 'Public links never include wallet, keys, or admin data' };
+      return withPrompt(id, { publicRoutes: ['/share/trade/:id', '/share/trade/:id.png', '/share/trade/:id.mp4', '/share/account'], note: 'Public links never include wallet, keys, or admin data' });
     case 'withdraw':
-      return { destinationConfigured: !!cfg.WITHDRAW_ADDRESS, reserveSol: cfg.WITHDRAW_RESERVE_SOL, paper: !trader.live };
+      return withPrompt(id, { destinationConfigured: !!cfg.WITHDRAW_ADDRESS, reserveSol: cfg.WITHDRAW_RESERVE_SOL, paper: !trader.live });
     case 'errors':
-      return { rpcErrors: market.stats.rpcErrors, notes: 'Buy/sell failures, rug rejects, and risk holds land here' };
+      return withPrompt(id, { rpcErrors: market.stats.rpcErrors, notes: 'Buy/sell failures, rug rejects, and risk holds land here' });
     default:
-      return {};
+      return withPrompt(id, {});
   }
 }
 
