@@ -372,7 +372,7 @@ function makeDesk(node) {
   sh.rotation.x = -Math.PI / 2; sh.position.y = 0.012; root.add(sh);
 
   const chair = new THREE.Group();
-  chair.position.set(0, 0, -0.28);
+  chair.position.set(-0.05, 0.04, -0.32);
   const seat = new THREE.Mesh(geos.chairSeat, wood2); seat.position.y = 0.38;
   const back = new THREE.Mesh(geos.chairBack, wood2); back.position.set(0, 0.58, -0.18);
   chair.add(seat, back);
@@ -383,19 +383,19 @@ function makeDesk(node) {
 
   const desk = new THREE.Group();
   desk.position.set(0, 0, 0.18);
-  const top = new THREE.Mesh(geos.deskTop, wood); top.position.y = 0.54;
-  const lip = new THREE.Mesh(geos.deskLip, wood2); lip.position.set(0, 0.51, 0.37);
+  const top = new THREE.Mesh(geos.deskTop, wood); top.position.y = 0.50;
+  const lip = new THREE.Mesh(geos.deskLip, wood2); lip.position.set(0, 0.47, 0.37);
   desk.add(top, lip);
   [[-0.6, 0.26, 0.32], [0.6, 0.26, 0.32], [-0.6, 0.26, -0.3], [0.6, 0.26, -0.3]].forEach(([x, y, z]) => {
     const l = new THREE.Mesh(geos.deskLeg, metal); l.position.set(x, y, z); desk.add(l);
   });
-  const kb = new THREE.Mesh(geos.keyboard, metal); kb.position.set(0, 0.575, 0.02); desk.add(kb);
+  const kb = new THREE.Mesh(geos.keyboard, metal); kb.position.set(0, 0.535, 0.02); desk.add(kb);
   for (let i = 0; i < 3; i++) {
     const row = new THREE.Mesh(geos.keyRow, mat('#2E2E36'));
-    row.position.set(0, 0.588, -0.03 + i * 0.04); desk.add(row);
+    row.position.set(0, 0.548, -0.03 + i * 0.04); desk.add(row);
   }
   const mon = new THREE.Group();
-  mon.position.set(0, 0.54, 0.28);
+  mon.position.set(0.1, 0.50, 0.28);
   const base = new THREE.Mesh(geos.monitorBase, metal); base.position.y = 0.01;
   const stem = new THREE.Mesh(geos.monitorStem, metal); stem.position.y = 0.1;
   const bezel = new THREE.Mesh(geos.monitor, mat('#101014', { metalness: 0.35, roughness: 0.3 }));
@@ -408,7 +408,7 @@ function makeDesk(node) {
   desk.add(mon);
 
   const light = new THREE.Mesh(geos.status, mat('#52525B', { emissive: '#52525B', emissiveIntensity: 0.8, roughness: 0.3 }));
-  light.position.set(0.58, 0.58, 0.28);
+  light.position.set(0.58, 0.54, 0.28);
   desk.add(light);
   root.add(desk);
 
@@ -417,7 +417,8 @@ function makeDesk(node) {
   root.add(tag);
 
   const bot = makeBot(node);
-  bot.position.set(0, 0, -0.16);
+  bot.position.set(-0.05, 0.14, -0.2);
+  bot.scale.setScalar(1.16);
   seatedPose(bot);
   root.add(bot);
 
@@ -434,9 +435,9 @@ function makeDesk(node) {
 }
 
 function defaultCamera() {
-  camera.position.set(6.2, 11.2, 22.4);
-  camera.lookAt(0, 0.5, 0);
-  controls.target.set(0, 0.45, 0);
+  camera.position.set(3.4, 7.6, 16.8);
+  camera.lookAt(0, 0.55, 0);
+  controls.target.set(0, 0.55, 0);
   controls.update();
 }
 
@@ -447,16 +448,16 @@ function buildScene(w) {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color('#0B0B0D');
-  scene.fog = new THREE.Fog('#0B0B0D', 32, 72);
+  scene.fog = new THREE.Fog('#0B0B0D', 38, 85);
 
-  camera = new THREE.PerspectiveCamera(42, 1, 0.1, 80);
+  camera = new THREE.PerspectiveCamera(47, 1, 0.1, 90);
   renderer = new THREE.WebGLRenderer({
     canvas, antialias: !isMob(), alpha: false, powerPreference: 'high-performance',
   });
   renderer.setClearColor('#0B0B0D', 1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.08;
+  renderer.toneMappingExposure = 1.22;
   const pr = Math.min(isMob() ? 1.25 : 1.6, window.devicePixelRatio || 1);
   renderer.setPixelRatio(pr);
 
@@ -467,22 +468,22 @@ function buildScene(w) {
   controls.maxDistance = 42;
   controls.minPolarAngle = 0.22;
   controls.maxPolarAngle = 1.32;
-  controls.target.set(0, 0.45, 0);
+  controls.target.set(0, 0.55, 0);
   controls.update();
 
-  const hemi = new THREE.HemisphereLight(0x6b7a99, 0x1a1210, 0.7);
-  const key = new THREE.DirectionalLight(0xfff2e0, 1.05);
+  const hemi = new THREE.HemisphereLight(0x8a97b5, 0x1a1210, 0.95);
+  const key = new THREE.DirectionalLight(0xfff2e0, 1.35);
   key.position.set(6, 10, 8);
-  const fill = new THREE.DirectionalLight(0x4f6fff, 0.28);
+  const fill = new THREE.DirectionalLight(0x4f6fff, 0.42);
   fill.position.set(-8, 4, -4);
-  const rim = new THREE.DirectionalLight(0x66ccff, 0.22);
+  const rim = new THREE.DirectionalLight(0x66ccff, 0.35);
   rim.position.set(0, 6, -10);
-  const floorGlow = new THREE.PointLight(0x3b82f6, 1.1, 28, 2);
-  floorGlow.position.set(0, 2.2, 0);
+  const floorGlow = new THREE.PointLight(0x3b82f6, 1.45, 32, 2);
+  floorGlow.position.set(0, 2.4, 0);
   scene.add(hemi, key, fill, rim, floorGlow);
 
   makeGeos();
-  const floorMat = mat('#121216', { roughness: 0.92, metalness: 0.04 });
+  const floorMat = mat('#1C1C24', { roughness: 0.9, metalness: 0.05 });
   floor = new THREE.Mesh(new THREE.CircleGeometry(28, 48), floorMat);
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
@@ -544,7 +545,7 @@ function ensureCapRenderer(W, H) {
     capRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
     capRenderer.outputColorSpace = THREE.SRGBColorSpace;
     capRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-    capRenderer.toneMappingExposure = 1.08;
+    capRenderer.toneMappingExposure = 1.22;
     capRenderer.setPixelRatio(1);
     capRenderer.setClearColor('#0B0B0D', 1);
   }
@@ -889,10 +890,10 @@ window.addEventListener('resize', () => { if (active) resize(); });
 function lookAtAgent(id, dist) {
   const d = desks.get(id);
   if (!d || !camera || !controls) return false;
-  const gap = dist == null ? 3.4 : dist;
+  const gap = dist == null ? 3.2 : dist;
   const p = d.root.position.clone();
-  p.y += 0.72;
-  camera.position.set(p.x + gap * 0.55, p.y + 1.45, p.z + gap);
+  p.y += 0.7;
+  camera.position.set(p.x + gap * 0.95, p.y + 1.15, p.z + gap * 0.7);
   controls.target.copy(p);
   controls.update();
   return true;
