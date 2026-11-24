@@ -58,6 +58,7 @@
       <select id="agentJump" class="hidden" aria-hidden="true" tabindex="-1"><option value="">Office…</option></select>
     </div>
     <button type="button" class="view-btn hidden" id="tourToggle" aria-label="Start cinematic tour">Tour</button>
+    <button type="button" class="view-btn hidden" id="recordTourBtn" aria-label="Record a lightweight office tour">Record tour</button>
     <button type="button" class="view-btn hidden" id="fxToggle" aria-label="Toggle cinematic FX">FX High</button>
   </header>
   <div id="recHud" class="rec-hud">
@@ -109,6 +110,7 @@
     <canvas id="cv3d" class="hidden" aria-label="3D office"></canvas>
   </div>
   <div class="cam-hint hidden" id="camHint">drag to spin 360° · two fingers to pan · pinch or scroll to zoom · tap an object to close in · tap empty to ease back</div>
+  <div id="tourCaption" class="tour-caption hidden" aria-live="polite"></div>
   <div class="sound-dock" id="soundDock">
     <button type="button" class="sound-speaker" id="audioMute" aria-label="Mute office sound">
       <span class="spk" aria-hidden="true">🔊</span>

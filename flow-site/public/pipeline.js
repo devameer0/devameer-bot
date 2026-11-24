@@ -1314,6 +1314,11 @@
       tourBtn._bound = true;
       tourBtn.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.toggleTour) window.DevameerOffice.toggleTour(); });
     }
+    const recTourBtn = $('#recordTourBtn');
+    if (recTourBtn && !recTourBtn._bound) {
+      recTourBtn._bound = true;
+      recTourBtn.addEventListener('click', () => { if (window.DevameerOffice && window.DevameerOffice.toggleRecordTour) window.DevameerOffice.toggleRecordTour(); });
+    }
     const fxBtn = $('#fxToggle');
     if (fxBtn && !fxBtn._bound) {
       fxBtn._bound = true;
@@ -1488,7 +1493,7 @@
     if (officeDock) officeDock.classList.toggle('hidden', state.viewMode !== '3d');
     const jumpWrap = $('#jumpWrap');
     if (jumpWrap) jumpWrap.classList.toggle('hidden', state.viewMode !== '3d');
-    ['tourToggle', 'fxToggle', 'roofToggle'].forEach((id) => {
+    ['tourToggle', 'recordTourBtn', 'fxToggle'].forEach((id) => {
       const el = $('#' + id);
       if (el) el.classList.toggle('hidden', state.viewMode !== '3d');
     });

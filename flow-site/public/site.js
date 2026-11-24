@@ -1,5 +1,10 @@
 (() => {
   const $ = (s) => document.querySelector(s);
+  try {
+    if (location.search && /(?:^|[?&])(record|room|loop|secs)=/i.test(location.search)) {
+      sessionStorage.setItem('devameer-flow-query', location.search);
+    }
+  } catch {}
   function showLogin() {
     $('#login').classList.remove('hidden');
     $('#app').classList.add('hidden');
