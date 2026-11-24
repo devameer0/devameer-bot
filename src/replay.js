@@ -164,7 +164,8 @@ function mount(app, { engine, ticks, share, requireAdmin, requireRead }) {
     try {
       const theme = share.themeOf(req.query);
       const aspect = (req.query.aspect === '9:16' || req.query.aspect === 'portrait') ? '9:16' : '1:1';
-      const seconds = Math.max(8, Math.min(15, +req.query.seconds || 0)) || undefined;
+      const qSec = +req.query.seconds;
+      const seconds = Number.isFinite(qSec) && qSec > 0 ? Math.max(8, Math.min(15, qSec)) : undefined;
       const buf = await renderMp4({ data: d, theme, aspect, seconds });
       sendMp4(res, buf, name);
     } catch (e) {
