@@ -146,7 +146,7 @@ function mount(app, { engine, ticks, share, requireAdmin, requireRead }) {
     d = share.applyPrivacy(await share.decorateTrade(d, ticks), share.flagsOf(q));
     return d;
   }
-  async function accountPayload(q) {
+  function accountPayload(q) {
     return share.applyPrivacy(share.publicAccount(engine, q), share.flagsOf(q));
   }
 
@@ -180,14 +180,14 @@ function mount(app, { engine, ticks, share, requireAdmin, requireRead }) {
   });
   app.get('/share/account.mp4', async (req, res) => {
     try {
-      const d = accountPayload(req.query);
+      const d = await Promise.resolve(accountPayload(req.query));
       await runRender(req, res, d, 'devameer-account-replay.mp4');
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
   app.get('/api/replay/render', requireAdmin, async (req, res) => {
     try {
       const kind = req.query.kind || (req.query.id ? 'trade' : 'account');
-      const d = kind === 'trade' ? await tradePayload(req.query.id, req.query) : accountPayload(req.query);
+      const d = kind === 'trade' ? await tradePayload(req.query.id, req.query) : await Promise.resolve(accountPayload(req.query));
       if (!d) return res.status(404).json({ error: 'not found' });
       const name = d.kind === 'account' ? 'devameer-account-replay.mp4' : 'devameer-' + String(d.symbol || 'trade').replace(/[^A-Za-z0-9]/g, '') + '-replay.mp4';
       await runRender(req, res, d, name);
