@@ -1175,8 +1175,9 @@ function stepDoors() {
   const p = camera.position;
   for (const d of doorList) {
     const dist = Math.hypot(p.x - d.x, p.z - d.z);
-    const want = dist < 2.15 ? d.openAng : d.closedAng;
-    d.mesh.rotation.y += (want - d.mesh.rotation.y) * 0.14;
+    const thisOffice = d.roomId && (closeOn === d.roomId || (controls && rooms.get(d.roomId) && Math.hypot((controls.target.x - (rooms.get(d.roomId).cx || 0)), (controls.target.z - (rooms.get(d.roomId).cz || 0))) < 1.8 && dist < 3.2));
+    const want = (dist < 1.85 && thisOffice) ? d.openAng : d.closedAng;
+    d.mesh.rotation.y += (want - d.mesh.rotation.y) * 0.16;
   }
 }
 
@@ -1188,40 +1189,30 @@ function furnishOffice(spec, node, buckets) {
 
   pushOriented(buckets.carpet, lx0 + 0.03, lx1 - 0.03, lz0 + 0.03, lz1 - 0.03, 0.012, 0.03, cx, cz, ang);
 
-  // Back (outward) + sides solid; inward wall with door cut
-  pushOriented(walls, lx0, lx1, lz1 - WALL_T, lz1, 0, CEIL_H, cx, cz, ang);
-  pushOriented(walls, lx0, lx0 + WALL_T, lz0, lz1, 0, CEIL_H, cx, cz, ang);
-  pushOriented(walls, lx1 - WALL_T, lx1, lz0, lz1, 0, CEIL_H, cx, cz, ang);
+  // Back (outward) + sides stay solid and opaque. Only the inward (door) wall fades near the camera.
+  const solid = [];
+  const doorWalls = [];
+  pushOriented(solid, lx0, lx1, lz1 - WALL_T, lz1, 0, CEIL_H, cx, cz, ang);
+  pushOriented(solid, lx0, lx0 + WALL_T, lz0, lz1, 0, CEIL_H, cx, cz, ang);
+  pushOriented(solid, lx1 - WALL_T, lx1, lz0, lz1, 0, CEIL_H, cx, cz, ang);
   const doorLo = -DOOR_W / 2, doorHi = DOOR_W / 2;
-  pushOriented(walls, lx0, doorLo, lz0, lz0 + WALL_T, 0, CEIL_H, cx, cz, ang);
-  pushOriented(walls, doorHi, lx1, lz0, lz0 + WALL_T, 0, CEIL_H, cx, cz, ang);
-  pushOriented(walls, doorLo, doorHi, lz0, lz0 + WALL_T, DOOR_H, CEIL_H, cx, cz, ang);
+  pushOriented(doorWalls, lx0, doorLo, lz0, lz0 + WALL_T, 0, CEIL_H, cx, cz, ang);
+  pushOriented(doorWalls, doorHi, lx1, lz0, lz0 + WALL_T, 0, CEIL_H, cx, cz, ang);
+  pushOriented(doorWalls, doorLo, doorHi, lz0, lz0 + WALL_T, DOOR_H, CEIL_H, cx, cz, ang);
   pushOriented(buckets.trim, lx0 + 0.05, lx1 - 0.05, lz0 + 0.02, lz0 + 0.05, 0.03, 0.05, cx, cz, ang);
   pushOriented(buckets.trim, lx0 + 0.05, lx1 - 0.05, lz1 - 0.05, lz1 - 0.02, 0.03, 0.05, cx, cz, ang);
 
   const wallMat = cartoonMat({ color: '#F4F1EA', roughness: 0.88, metalness: 0.02 });
-  const wallMesh = mergeBucket(walls, wallMat);
-  if (wallMesh) {
-    wallMesh.userData.fadeWall = true;
-    wallMesh.userData.cx = cx;
-    wallMesh.userData.cz = cz;
-    wallMesh.userData.fadeR = Math.max(w, d) * 0.7;
-    fadeWalls.push(wallMesh);
+  mergeBucket(solid, wallMat);
+  const doorMesh = mergeBucket(doorWalls, wallMat.clone());
+  if (doorMesh) {
+    doorMesh.userData.fadeWall = true;
+    const inward = 0.5;
+    doorMesh.userData.cx = cx + Math.sin(ang) * ((-d / 2) * inward);
+    doorMesh.userData.cz = cz + Math.cos(ang) * ((-d / 2) * inward);
+    doorMesh.userData.fadeR = 1.15;
+    fadeWalls.push(doorMesh);
   }
-
-  const win = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.6, 1.35),
-    cartoonMat({ color: '#9EC9F0', emissive: '#14F1C9', emissiveIntensity: 0.18, roughness: 0.12, metalness: 0.08, side: THREE.DoubleSide, transparent: true, opacity: 0.88 }),
-  );
-  // outward window: local (0, 1.6, lz1 - 0.02)
-  win.position.set(
-    cx + Math.sin(ang) * (lz1 - 0.02) + Math.cos(ang) * 0,
-    1.6,
-    cz + Math.cos(ang) * (lz1 - 0.02),
-  );
-  win.rotation.y = ang;
-  windowMats.push(win.material);
-  hqRoot.add(win);
 
   pendingInteriors.push({ spec, node, color });
   rooms.set(spec.id, { ...spec, color, node, far: false, interior: null, furnished: false });
@@ -1242,9 +1233,21 @@ function furnishOfficeInterior(spec, node) {
 
   const dsk = makeDesk(node);
   const side = (hashId(spec.id) % 2) ? 1 : -1;
-  dsk.root.position.set(side * 0.55, 0, 0.25);
-  dsk.root.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+  dsk.root.position.set(0, 0, 0.42);
+  dsk.root.rotation.y = 0;
   interior.add(dsk.root);
+  // Reparent the agent into the office so they can walk to the door and back.
+  if (dsk.bot && dsk.sit && dsk.bot.parent === dsk.sit) {
+    const wp = new THREE.Vector3();
+    dsk.bot.getWorldPosition(wp);
+    dsk.sit.remove(dsk.bot);
+    interior.add(dsk.bot);
+    interior.worldToLocal(wp);
+    dsk.bot.position.copy(wp);
+  }
+  dsk.homePos = dsk.bot.position.clone();
+  dsk.doorPos = new THREE.Vector3(0, 0, -d / 2 + 0.42);
+  dsk.officeRoot = interior;
 
   const plant = makePlant(hashId(spec.id));
   plant.position.set(-side * 1.1, 0, 1.15);
@@ -1294,20 +1297,21 @@ function furnishOfficeInterior(spec, node) {
   root.add(plate);
   dsk.tag = plate;
 
-  const doorMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(0.05, DOOR_H - 0.1, DOOR_W - 0.1),
-    cartoonMat({ color: '#DCEAF6', transparent: true, opacity: 0.28, roughness: 0.06, metalness: 0.18 }),
-  );
+  const woodDoor = cartoonMat({ color: '#8B5A2B', roughness: 0.72, metalness: 0.04 });
+  const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.07, DOOR_H - 0.08, DOOR_W - 0.08), woodDoor);
+  const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.02, DOOR_H - 0.35, (DOOR_W - 0.2) * 0.42), mat('#6F4E37', { roughness: 0.7 }));
+  doorPanel.position.set(0.03, 0, -0.18);
+  const handle = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), mat('#C9A227', { metalness: 0.7, roughness: 0.3 }));
+  handle.position.set(0.06, 0, DOOR_W * 0.28);
   const pivot = new THREE.Group();
   pivot.position.set(-DOOR_W / 2, 0, -d / 2);
-  doorMesh.position.set(0, DOOR_H / 2, DOOR_W / 2 - 0.05);
+  doorMesh.position.set(0, DOOR_H / 2, DOOR_W / 2 - 0.04);
+  doorMesh.add(doorPanel, handle);
   pivot.add(doorMesh);
-  pivot.rotation.y = 0.18;
+  pivot.rotation.y = 0;
   root.add(pivot);
-  const worldHinge = new THREE.Vector3(cx, 0, cz);
-  // door auto-open uses world x/z; store room door at inward radius
   const hinge = new THREE.Vector3(-DOOR_W / 2, 0, -d / 2).applyAxisAngle(new THREE.Vector3(0, 1, 0), ang).add(new THREE.Vector3(cx, 0, cz));
-  doorList.push({ mesh: pivot, x: hinge.x, z: hinge.z, closedAng: 0.18, openAng: 0.18 - 1.25 });
+  doorList.push({ mesh: pivot, x: hinge.x, z: hinge.z, closedAng: 0, openAng: -1.2, roomId: spec.id });
 
   hqRoot.add(root);
   const room = rooms.get(spec.id);
@@ -1458,27 +1462,7 @@ function buildAtrium() {
     hqRoot.add(ring);
   });
 
-  // Glass dome
-  const domeMat = cartoonMat({
-    color: '#B8E0FF', emissive: '#14F1C9', emissiveIntensity: 0.08,
-    roughness: 0.06, metalness: 0.15, transparent: true, opacity: 0.22,
-    side: THREE.DoubleSide,
-  });
-  domeMat.userData.alwaysTransparent = true;
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(RING_IN + 0.15, 28, 16, 0, Math.PI * 2, 0, Math.PI / 2), domeMat);
-  dome.position.y = 0.02;
-  dome.name = 'glassDome';
-  hqRoot.add(dome);
-  // Dome ribs
-  const ribMat = mat('#E8F6FF', { metalness: 0.4, roughness: 0.25 });
-  for (let i = 0; i < 8; i++) {
-    const rib = new THREE.Mesh(new THREE.TorusGeometry(RING_IN + 0.16, 0.03, 5, 24, Math.PI / 2), ribMat);
-    rib.rotation.y = (i / 8) * Math.PI * 2;
-    rib.rotation.z = Math.PI / 2;
-    rib.position.y = 0.02;
-    hqRoot.add(rib);
-  }
-
+  // Atrium is enclosed by the ordinary roof (no glass dome).
   buildHoloCore();
 }
 
@@ -1640,14 +1624,19 @@ function buildPods(buckets) {
       outer.push(g);
     });
     const facade = cartoonMat({ color: '#F7F4EE', roughness: 0.82, metalness: 0.04 });
-    const fm = mergeBucket(outer, facade);
-    if (fm) {
-      fm.userData.fadeWall = true;
-      fm.userData.cx = Math.sin(pod.ang) * RING_OFFICE;
-      fm.userData.cz = Math.cos(pod.ang) * RING_OFFICE;
-      fm.userData.fadeR = 4.2;
-      fadeWalls.push(fm);
+    mergeBucket(outer, facade);
+    // Opaque window insets on the outer wall (solid, cannot see through)
+    const paneMat = mat('#3F4654', { roughness: 0.35, metalness: 0.08 });
+    const panes = Math.max(2, n * 2);
+    for (let i = 0; i < panes; i++) {
+      const u = (i + 0.5) / panes;
+      const ta = pod.ang - span / 2 + u * span;
+      const pane = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.15, 0.06), paneMat);
+      pane.position.set(Math.sin(ta) * (r1 + 0.09), 1.55, Math.cos(ta) * (r1 + 0.09));
+      pane.rotation.y = ta;
+      hqRoot.add(pane);
     }
+
     // Colored band
     const band = new THREE.Mesh(
       new THREE.BoxGeometry(Math.max(2.2, n * 1.7), 0.16, 0.18),
@@ -1663,16 +1652,7 @@ function buildPods(buckets) {
     sign.rotation.y = pod.ang + Math.PI;
     hqRoot.add(sign);
 
-    // Theme exterior
-    if (pod.id === 'hunters') {
-      [-0.12, 0.12].forEach((off, i) => {
-        const a = pod.ang + off;
-        const dish = makeRadarDish(pod.color);
-        dish.position.set(Math.sin(a) * (RING_OFFICE + 0.6), CEIL_H + 0.15, Math.cos(a) * (RING_OFFICE + 0.6));
-        dish.rotation.y = a;
-        roofGroup.add(dish);
-      });
-    }
+    // Theme exterior (kept at ground, not on the roof)
     if (pod.id === 'security') {
       const scanner = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.2, 0.16), mat('#1C1917', { metalness: 0.5, roughness: 0.3 }));
       const r = r0 - 0.5;
@@ -1699,58 +1679,26 @@ function makeRadarDish(color) {
 function buildRoofs() {
   if (!roofGroup) roofGroup = new THREE.Group();
   roofGroup.name = 'roof';
-  const roofMat = mat('#EFECE6', { roughness: 0.8, metalness: 0.05 });
-  const pods = hqLayout.pods || [];
-  pods.forEach((pod) => {
-    const span = pod.span;
-    const r0 = RING_OFFICE - ROOM_D / 2 - 0.15;
-    const r1 = RING_OUT + 0.15;
-    const rm = (r0 + r1) / 2;
-    const w = span * rm + 0.4;
-    const d = r1 - r0 + 0.2;
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(w, 0.14, d), roofMat);
-    slab.position.set(Math.sin(pod.ang) * rm, CEIL_H + 0.1, Math.cos(pod.ang) * rm);
-    slab.rotation.y = pod.ang;
-    roofGroup.add(slab);
-    // parapet
-    const rail = mat('#D6D3CD', { metalness: 0.3, roughness: 0.4 });
-    const para = new THREE.Mesh(new THREE.BoxGeometry(w + 0.08, 0.32, 0.08), rail);
-    para.position.set(Math.sin(pod.ang) * (r1 - 0.05), CEIL_H + 0.28, Math.cos(pod.ang) * (r1 - 0.05));
-    para.rotation.y = pod.ang;
-    roofGroup.add(para);
-
-    if (pod.id === 'trading') {
-      const pad = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.35, 0.06, 24), mat('#334155', { roughness: 0.55 }));
-      pad.position.set(Math.sin(pod.ang) * rm, CEIL_H + 0.2, Math.cos(pod.ang) * rm);
-      const H = makeHelipadMark();
-      H.position.set(Math.sin(pod.ang) * rm, CEIL_H + 0.24, Math.cos(pod.ang) * rm);
-      H.rotation.x = -Math.PI / 2;
-      H.rotation.z = -pod.ang;
-      roofGroup.add(pad, H);
-      tagPick(pad, 'inspect', 'helipad');
-    }
-    if (pod.id === 'back') {
-      for (let i = 0; i < 5; i++) {
-        const p = makePlant(i + 3);
-        const off = (i - 2) * 0.55;
-        const x = Math.sin(pod.ang) * rm + Math.cos(pod.ang) * off;
-        const z = Math.cos(pod.ang) * rm - Math.sin(pod.ang) * off;
-        p.position.set(x, CEIL_H + 0.17, z);
-        p.scale.setScalar(1.2);
-        roofGroup.add(p);
-      }
-    }
-    if (pod.id === 'intake') {
-      // small garden boxes
-      for (let i = 0; i < 3; i++) {
-        const box = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.2, 0.4), mat('#3F7A2A', { roughness: 0.9 }));
-        const off = (i - 1) * 0.85;
-        box.position.set(Math.sin(pod.ang) * rm + Math.cos(pod.ang) * off, CEIL_H + 0.22, Math.cos(pod.ang) * rm - Math.sin(pod.ang) * off);
-        box.rotation.y = pod.ang;
-        roofGroup.add(box);
-      }
-    }
-  });
+  // Plain commercial roof: flat deck, short parapet, ordinary muted colours.
+  const roofMat = mat('#7A736B', { roughness: 0.92, metalness: 0.04 });
+  const paraMat = mat('#5E5852', { roughness: 0.88, metalness: 0.06 });
+  const deck = new THREE.Mesh(new THREE.CylinderGeometry(RING_OUT + 0.35, RING_OUT + 0.35, 0.18, 48), roofMat);
+  deck.position.y = CEIL_H + 0.1;
+  deck.receiveShadow = true;
+  roofGroup.add(deck);
+  const parapet = new THREE.Mesh(
+    new THREE.CylinderGeometry(RING_OUT + 0.42, RING_OUT + 0.42, 0.46, 48, 1, true),
+    paraMat,
+  );
+  parapet.position.y = CEIL_H + 0.32;
+  roofGroup.add(parapet);
+  const cap = new THREE.Mesh(
+    new THREE.TorusGeometry(RING_OUT + 0.42, 0.07, 6, 48),
+    paraMat,
+  );
+  cap.rotation.x = Math.PI / 2;
+  cap.position.y = CEIL_H + 0.55;
+  roofGroup.add(cap);
   if (!roofGroup.parent) hqRoot.add(roofGroup);
 }
 
@@ -1938,7 +1886,6 @@ function buildHeadquarters(w) {
   }
 
   buildRoofs();
-  buildSkyBridges();
   buildEntrance();
   buildParking();
 
@@ -2137,7 +2084,17 @@ function isoOffset(dist) {
   return new THREE.Vector3().setFromSpherical(new THREE.Spherical(r, phi, ISO_AZI));
 }
 
-function applyIsoRig() {
+function viewOffset(dist) {
+  const r = Math.max(0.08, dist);
+  let dir;
+  if (camera && controls) dir = camera.position.clone().sub(controls.target);
+  if (!dir || dir.length() < 0.05) dir = new THREE.Vector3(0.55, 0.55, 0.85);
+  if (dir.y < 0.1) dir.y = 0.1;
+  dir.normalize();
+  return dir.multiplyScalar(r);
+}
+
+function clampCamBounds() {
   if (!camera || !controls) return;
   const tgt = controls.target;
   const lim = CITY_PAN_LIMIT;
@@ -2147,10 +2104,12 @@ function applyIsoRig() {
     tgt.z *= lim / pr;
   }
   if (tgt.y < 0.12) tgt.y = 0.12;
-  const dist = camera.position.distanceTo(tgt);
-  camera.position.copy(tgt).add(isoOffset(dist));
   if (camera.position.y < 0.32) camera.position.y = 0.32;
-  camera.lookAt(tgt);
+}
+
+function applyIsoRig() {
+  // Starting-angle helper only; never locks azimuth while the user orbits.
+  clampCamBounds();
 }
 
 function frameIso(target, dist, instant) {
@@ -2640,29 +2599,29 @@ function buildScene(w) {
 
   controls = new MapControls(camera, canvas);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.14;
+  controls.dampingFactor = 0.16;
   controls.enablePan = true;
-  controls.enableRotate = false;
+  controls.enableRotate = true;
   controls.enableZoom = true;
   controls.autoRotate = false;
   controls.screenSpacePanning = false;
   controls.zoomToCursor = true;
-  controls.panSpeed = 1.2;
+  controls.rotateSpeed = 0.72;
+  controls.panSpeed = 1.15;
   controls.zoomSpeed = 1.2;
   controls.minDistance = 0.08;
   controls.maxDistance = 220;
-  controls.minPolarAngle = ISO_PHI_FAR;
-  controls.maxPolarAngle = ISO_PHI_NEAR;
-  controls.minAzimuthAngle = ISO_AZI;
-  controls.maxAzimuthAngle = ISO_AZI;
-  controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+  controls.minPolarAngle = 0.12;
+  controls.maxPolarAngle = Math.PI / 2 + 0.12;
+  controls.minAzimuthAngle = -Infinity;
+  controls.maxAzimuthAngle = Infinity;
+  controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
   controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
   controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
-  controls.touches.ONE = THREE.TOUCH.PAN;
-  controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+  controls.touches.ONE = THREE.TOUCH.ROTATE;
+  controls.touches.TWO = THREE.TOUCH.DOLLY_PAN;
   controls.target.set(0, 1.35, 2.2);
   controls.update();
-  applyIsoRig();
   bindOfficePointer(canvas);
 
   hemiLight = new THREE.HemisphereLight(0x8a97b5, 0x1a1210, 0.95);
@@ -2803,17 +2762,16 @@ function headToward(d, other) {
 }
 
 function pickIdle(d, now) {
-  if (d.anim.mode === 'work' || d.anim.mode === 'celebrate' || d.anim.mode === 'shake') {
+  if (d.anim.mode === 'work' || d.anim.mode === 'celebrate' || d.anim.mode === 'shake' || d.anim.mode === 'walk' || d.anim.mode === 'sigh' || d.anim.mode === 'scratch') {
     if (now < d.anim.until) return;
   }
   if (now < (d.nextIdle || 0)) return;
-  const acts = ['stretch', 'sip', 'scratch', 'lookNeighbor', 'spin', 'yawn', 'phone', 'lean'];
   const hid = hashId(d.id);
+  const acts = ['stretch', 'sip', 'lookAway', 'yawn', 'phone', 'lean', 'stretch', 'sip', 'walk'];
   const pick = acts[Math.floor((now / 97 + hid) % acts.length)];
-  const dur = pick === 'spin' ? 1600 : (pick === 'sip' || pick === 'phone' ? 1800 : 1400);
-  const look = pick === 'lookNeighbor' ? (nearestNeighbor(d.id) || {}).id : '';
-  d.anim = { mode: pick, until: now + dur, started: now, evType: '', look };
-  d.nextIdle = now + 5000 + (hid % 9000) + Math.random() * 5000;
+  const dur = pick === 'walk' ? 6200 : (pick === 'sip' || pick === 'phone' ? 2000 : 1500);
+  d.anim = { mode: pick, until: now + dur, started: now, evType: '', look: '' };
+  d.nextIdle = now + 4500 + (hid % 8000) + Math.random() * 4000;
 }
 
 function applyAnim(d, now, dt) {
@@ -2829,14 +2787,12 @@ function applyAnim(d, now, dt) {
   let headX = 0.16, headY = 0, headZ = 0;
   let lArm = { x: -0.85, y: 0.15, z: 0.35 }, rArm = { x: -0.85, y: -0.15, z: -0.35 };
   let lLow = -1.05, rLow = -1.05;
-  let sitY = 0;
-
-  const glance = d.glanceUntil && now < d.glanceUntil && d.glanceId;
-  if (glance) {
-    const other = desks.get(d.glanceId);
-    headY = headToward(d, other);
-    headX = 0.05;
-  }
+  let lLegX = Math.PI / 2 - 0.15, rLegX = Math.PI / 2 - 0.15;
+  let lLegLow = -Math.PI / 2 + 0.1, rLegLow = -Math.PI / 2 + 0.1;
+  let seated = true;
+  // Natural look stays on this agent's own screen (tiny saccades), never at another agent.
+  headY = Math.sin(t * 0.55 + hid) * 0.04;
+  headZ = Math.sin(t * 0.31 + hid * 0.2) * 0.02;
 
   if (a.mode === 'work' && now < a.until) {
     const typ = Math.sin(t * 22 + hid);
@@ -2844,7 +2800,7 @@ function applyAnim(d, now, dt) {
     rArm.x = -0.95 - typ * 0.08;
     lLow = -1.15 + typ * 0.16;
     rLow = -1.15 - typ * 0.16;
-    if (!glance) { headX = 0.28; headY *= 0.3; }
+    headX = 0.28 + typ * 0.03;
     bodyX = 0.12;
     bodyY += 0.01;
   } else if (a.mode === 'celebrate' && now < a.until) {
@@ -2881,14 +2837,41 @@ function applyAnim(d, now, dt) {
     rArm = { x: -2.2 * k - 0.5 * (1 - k), y: -0.4, z: -0.2 };
     rLow = -0.9;
     headY = 0.25 * k;
-  } else if (a.mode === 'lookNeighbor' && now < a.until) {
-    const other = desks.get(a.look) || nearestNeighbor(d.id);
-    headY = headToward(d, other);
+  } else if (a.mode === 'lookAway' && now < a.until) {
+    const k = Math.sin(((now - a.started) / Math.max(1, a.until - a.started)) * Math.PI);
+    headY = (hid % 2 ? 1 : -1) * 0.38 * k;
     headX = 0.06;
-    bodyZ = headY * 0.15;
-  } else if (a.mode === 'spin' && now < a.until) {
-    const u = (now - a.started) / (a.until - a.started);
-    sitY = Math.sin(u * Math.PI) * 0.55 * (hid % 2 ? 1 : -1);
+  } else if (a.mode === 'sigh' && now < a.until) {
+    const k = Math.sin(((now - a.started) / Math.max(1, a.until - a.started)) * Math.PI);
+    headX = 0.16 + 0.28 * k;
+    bodyX = 0.04 + 0.16 * k;
+    bodyY -= 0.03 * k;
+    lArm.x = -0.7; rArm.x = -0.7;
+  } else if (a.mode === 'walk' && now < a.until && d.bot && d.homePos && d.doorPos) {
+    seated = false;
+    const u = (now - a.started) / Math.max(1, a.until - a.started);
+    let dest, rising = 0, walking = 0;
+    if (u < 0.12) { dest = d.homePos; rising = u / 0.12; }
+    else if (u < 0.42) { const k = (u - 0.12) / 0.3; dest = d.homePos.clone().lerp(d.doorPos, k); walking = 1; rising = 1; }
+    else if (u < 0.58) { dest = d.doorPos; rising = 1; }
+    else if (u < 0.88) { const k = (u - 0.58) / 0.3; dest = d.doorPos.clone().lerp(d.homePos, k); walking = 1; rising = 1; }
+    else { dest = d.homePos; rising = 1 - (u - 0.88) / 0.12; }
+    const hy = d.homePos.y;
+    d.bot.position.set(dest.x, hy * (1 - Math.max(0, Math.min(1, rising))), dest.z);
+    const toDoor = d.doorPos.clone().sub(d.homePos);
+    if (u >= 0.12 && u < 0.88) d.bot.rotation.y = Math.atan2(toDoor.x, toDoor.z) + (u >= 0.58 ? Math.PI : 0);
+    else d.bot.rotation.y = 0;
+    const step = walking ? Math.sin(t * 9 + hid) : 0;
+    lLegX = 0.08 + step * 0.45 * walking;
+    rLegX = 0.08 - step * 0.45 * walking;
+    lLegLow = 0.1 + Math.max(0, -step) * 0.25 * walking;
+    rLegLow = 0.1 + Math.max(0, step) * 0.25 * walking;
+    bodyY = 0.56 + (0.38 * Math.max(0, Math.min(1, rising))) + breathe;
+    lArm = { x: -0.15 - step * 0.35 * walking, y: 0.05, z: 0.12 };
+    rArm = { x: -0.15 + step * 0.35 * walking, y: -0.05, z: -0.12 };
+    lLow = -0.2; rLow = -0.2;
+    headX = 0.06;
+    if (p.lLeg) { p.lLeg.position.y = 0.42 * (1 - Math.max(0, Math.min(1, rising))); p.rLeg.position.y = p.lLeg.position.y; }
   } else if (a.mode === 'yawn' && now < a.until) {
     const k = Math.sin(((now - a.started) / (a.until - a.started)) * Math.PI);
     headX = 0.16 - 0.35 * k;
@@ -2910,7 +2893,18 @@ function applyAnim(d, now, dt) {
   p.rArm.rotation.set(rArm.x, rArm.y, rArm.z);
   p.lArm.userData.lower.rotation.x = lLow;
   p.rArm.userData.lower.rotation.x = rLow;
-  if (d.sit) d.sit.rotation.y = sitY;
+  if (p.lLeg && p.rLeg) {
+    p.lLeg.rotation.x = lLegX;
+    p.rLeg.rotation.x = rLegX;
+    if (p.lLeg.userData.lower) p.lLeg.userData.lower.rotation.x = lLegLow;
+    if (p.rLeg.userData.lower) p.rLeg.userData.lower.rotation.x = rLegLow;
+    if (seated) { p.lLeg.position.y = 0.42; p.rLeg.position.y = 0.42; }
+  }
+  if (seated && d.bot && d.homePos && a.mode !== 'walk') {
+    d.bot.position.lerp(d.homePos, Math.min(1, (dt || 0.016) * 6));
+    d.bot.rotation.y *= Math.max(0, 1 - (dt || 0.016) * 6);
+  }
+  if (d.sit) d.sit.rotation.y = 0;
   const blink = ((now + hid) % 4200) < 120;
   const es = blink ? 0.12 : 1;
   p.eyeL.scale.y = es; p.eyeR.scale.y = es;
@@ -2975,10 +2969,6 @@ function triggerAnim(id, ev) {
   const celebrate = type === 'buy' || type === 'sell' || type === 'pass' || (ev && ev.data && ev.data.pnlPct > 0) || (type === 'exit' && ev && ev.ok !== false);
   const shake = ev && (ev.ok === false || type === 'reject' || type === 'error');
   const from = inferFrom(ev, id);
-  if (from && from !== id) {
-    d.glanceId = from;
-    d.glanceUntil = now + 700;
-  }
   const cab = from ? cables.find((c) => c.from === from && c.to === id) : null;
   if (cab) {
     d.pendingEv = { celebrate, shake, type };
@@ -2986,8 +2976,9 @@ function triggerAnim(id, ev) {
     return;
   }
   if (celebrate) { d.anim = { mode: 'celebrate', until: now + 1400, started: now, evType: type }; playCheer(d); }
-  else if (shake) { d.anim = { mode: 'shake', until: now + 800, started: now, evType: type }; playNope(d); }
-  else { d.anim = { mode: 'work', until: now + 1800, started: now, evType: type }; }
+  else if (shake && (type === 'reject' || type === 'error')) { d.anim = { mode: 'scratch', until: now + 1400, started: now, evType: type }; playNope(d); }
+  else if (shake) { d.anim = { mode: 'sigh', until: now + 1600, started: now, evType: type }; playNope(d); }
+  else { d.anim = { mode: 'work', until: now + 2200, started: now, evType: type }; }
 }
 
 function packetLabelTex(text, color) {
@@ -3061,13 +3052,12 @@ function onPacketArrive(p) {
   if (P && typeof P.pushScreenLine === 'function') P.pushScreenLine(p.to, line, '#93C5FD', Date.now());
   dest.scr.flashUntil = now + 900;
   dest.lastScreen = '';
-  dest.glanceId = p.from;
-  dest.glanceUntil = now + 350;
   const pending = dest.pendingEv || {};
   dest.pendingEv = null;
   if (pending.celebrate) { dest.anim = { mode: 'celebrate', until: now + 1400, started: now, evType: pending.type || 'buy' }; playCheer(dest); }
-  else if (pending.shake) { dest.anim = { mode: 'shake', until: now + 800, started: now, evType: pending.type || 'reject' }; playNope(dest); }
-  else { dest.anim = { mode: 'work', until: now + 1800, started: now, evType: pending.type || 'incoming' }; }
+  else if (pending.shake && (pending.type === 'reject' || pending.type === 'error')) { dest.anim = { mode: 'scratch', until: now + 1400, started: now, evType: pending.type || 'reject' }; playNope(dest); }
+  else if (pending.shake) { dest.anim = { mode: 'sigh', until: now + 1600, started: now, evType: pending.type || 'loss' }; playNope(dest); }
+  else { dest.anim = { mode: 'work', until: now + 2200, started: now, evType: pending.type || 'incoming' }; }
   playChime(dest);
 }
 
@@ -3155,7 +3145,7 @@ function step(now, dt) {
   if (!built) return;
   stepFurnish();
   stepFly(dt);
-  if (controls && !fly) { controls.update(); applyIsoRig(); }
+  if (controls && !fly) { controls.update(); clampCamBounds(); }
   for (const d of desks.values()) {
     pickIdle(d, now);
     applyAnim(d, now, dt);
@@ -3577,8 +3567,8 @@ function monitorFocus(d, tight) {
   } else {
     d.root.getWorldPosition(target).add(new THREE.Vector3(0, 0.95, 0.4));
   }
-  const dist = tight ? 1.28 : 2.05;
-  const pos = target.clone().add(isoOffset(dist));
+  const dist = tight ? 1.65 : 2.35;
+  const pos = target.clone().add(viewOffset(dist));
   return { pos, target };
 }
 
@@ -3628,16 +3618,19 @@ function flyToAgent(id, opts) {
 }
 
 function flyOverview(opts) {
-  const tgt = (overviewShot && overviewShot.target)
-    ? overviewShot.target.clone()
-    : new THREE.Vector3(0, 1.35, 2.2);
-  const dist = (overviewShot && overviewShot.pos)
-    ? Math.max(22, Math.min(ISO_CITY_DIST, overviewShot.pos.distanceTo(overviewShot.target)))
-    : ISO_CITY_DIST;
   inspectObj = null; inspectPrev = null;
   closeOn = null;
   if (typeof updateInspectBtn === 'function') updateInspectBtn();
-  frameIso(tgt, dist, opts && opts.instant);
+  if (overviewShot && overviewShot.pos && overviewShot.target) {
+    if (opts && opts.instant) {
+      camera.position.copy(overviewShot.pos);
+      controls.target.copy(overviewShot.target);
+      controls.update();
+      fly = null;
+    } else startFly(overviewShot.pos, overviewShot.target, 0.9);
+  } else {
+    frameIso(new THREE.Vector3(0, 1.35, 2.2), ISO_CITY_DIST, opts && opts.instant);
+  }
   updateOverviewBtn();
 }
 
@@ -3799,7 +3792,7 @@ function flyToObject(obj) {
   const maxDim = Math.max(size.x, size.y, size.z, 0.06);
   const fov = (camera.fov * Math.PI) / 180;
   const dist = Math.max(0.12, (maxDim * 0.7) / Math.tan(fov / 2) * 1.4);
-  const pos = center.clone().add(isoOffset(dist));
+  const pos = center.clone().add(viewOffset(dist));
   inspectObj = obj;
   closeOn = null;
   startFly(pos, center, 0.7);
@@ -3884,7 +3877,7 @@ function easeBack() {
   const len = camera.position.distanceTo(tgt);
   if (len < 0.05) return;
   const nextDist = Math.min(ISO_CITY_DIST, Math.max(len * 1.7, len + 6.5));
-  startFly(tgt.clone().add(isoOffset(nextDist)), tgt.clone(), 0.55);
+  startFly(tgt.clone().add(viewOffset(nextDist)), tgt.clone(), 0.55);
 }
 
 function flyToPoint(center, size) {
@@ -3900,7 +3893,7 @@ function flyToPoint(center, size) {
   if (tgt.y < 0.2) tgt.y = 0.2;
   inspectObj = { position: tgt };
   closeOn = null;
-  startFly(tgt.clone().add(isoOffset(dist)), tgt, 0.7);
+  startFly(tgt.clone().add(viewOffset(dist)), tgt, 0.7);
   updateInspectBtn();
   updateOverviewBtn();
   return true;
@@ -3962,8 +3955,9 @@ function updateOcclusion(dt) {
     const t = Math.max(0.08, Math.min(0.92, ap.dot(ab) / (abLen * abLen)));
     const closest = cam.clone().addScaledVector(ab, t);
     const dist = closest.distanceTo(c);
-    const between = dist < (w.userData.fadeR || 2.1) && cam.y < CEIL_H + 2.5;
-    const wWant = between ? 0.12 : 1;
+    const inFront = t < 0.78;
+    const between = inFront && dist < (w.userData.fadeR || 1.2) && cam.y < CEIL_H + 2.5;
+    const wWant = between ? 0.16 : 1;
     w.userData.fade = (w.userData.fade == null ? 1 : w.userData.fade) + (wWant - (w.userData.fade == null ? 1 : w.userData.fade)) * k;
     applyFade(w, w.userData.fade);
   }
@@ -4620,10 +4614,8 @@ window.DevameerOffice = {
     if (!camera || !controls) return false;
     const p = new THREE.Vector3(pos[0], pos[1], pos[2]);
     const g = new THREE.Vector3(target[0], target[1], target[2]);
-    const dist = p.distanceTo(g) || ISO_CITY_DIST;
-    const isoP = g.clone().add(isoOffset(dist));
-    if (instant === false) startFly(isoP, g, 0.8);
-    else { camera.position.copy(isoP); controls.target.copy(g); controls.update(); fly = null; applyIsoRig(); }
+    if (instant === false) startFly(p, g, 0.8);
+    else { camera.position.copy(p); controls.target.copy(g); controls.update(); fly = null; clampCamBounds(); }
     return true;
   },
   inspectByLabel(label) {
