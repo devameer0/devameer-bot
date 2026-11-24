@@ -208,6 +208,10 @@ app.get('/vendor/mp4-muxer.mjs', (req, res) => {
 });
 
 const pub = path.join(__dirname, 'public');
+const threeDir = path.join(__dirname, 'node_modules', 'three');
+if (fs.existsSync(threeDir)) {
+  app.use('/vendor/three', express.static(threeDir, { maxAge: '7d' }));
+}
 app.use(express.static(pub, { extensions: ['html'] }));
 
 app.listen(PORT, () => console.log(`Devameer Bot Pipeline on :${PORT} · bot ${BOT_URL}`));

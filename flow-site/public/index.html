@@ -15,6 +15,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/pipeline.css">
+<script type="importmap">
+{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/"}}
+</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><ellipse cx='32' cy='36' rx='24' ry='22' fill='%23fff' stroke='%23000' stroke-width='3'/><ellipse cx='28' cy='32' rx='3' ry='6' fill='%23000'/><ellipse cx='40' cy='30' rx='3' ry='6' fill='%23000'/></svg>">
 </head>
 <body>
@@ -38,6 +41,7 @@
     <span class="live-dot" id="liveDot" title="Streaming"><i></i>LIVE</span>
     <span class="mode-pill paper" id="modePill">PAPER</span>
     <span class="cap-pill hidden" id="capPill">DAILY CAP</span>
+    <button type="button" class="view-btn" id="viewToggle" aria-label="Switch to 2D cards">2D cards</button>
   </header>
   <div id="recHud" class="rec-hud">
     <button type="button" class="rec-btn" id="recToggle" aria-label="Record" aria-expanded="false" title="Record">
@@ -83,11 +87,16 @@
       <div class="rec-status" id="recStatus"></div>
     </div>
   </div>
-  <div id="wrap" class="wrap"><canvas id="cv"></canvas></div>
+  <div id="wrap" class="wrap">
+    <canvas id="cv"></canvas>
+    <canvas id="cv3d" class="hidden" aria-label="3D office"></canvas>
+  </div>
+  <div class="cam-hint hidden" id="camHint">drag to orbit · scroll to zoom</div>
   <div id="tip" class="tip hidden"></div>
 </section>
 <script src="/pipeline.js"></script>
 <script src="/record.js"></script>
 <script src="/site.js"></script>
+<script type="module" src="/office3d.js"></script>
 </body>
 </html>

@@ -56,3 +56,12 @@ html,body{height:100%;background:#0B0B0D;color:#FAFAFA;font-family:Inter,system-
 .rec-pct{font:700 10px Inter,system-ui,sans-serif;color:#A1A1AA;min-width:2.4em}
 .rec-progress{width:204px;max-width:70vw;height:3px;background:#27272A;border-radius:99px;overflow:hidden;align-self:flex-end}
 .rec-progress i{display:block;height:100%;width:0;background:#22C55E;border-radius:99px;transition:width .12s linear}
+
+.view-btn{pointer-events:auto;height:28px;padding:0 10px;border-radius:999px;border:1px solid #27272A;background:rgba(20,20,22,.82);color:#FAFAFA;font:700 10px Inter,system-ui,sans-serif;letter-spacing:.2px;cursor:pointer;backdrop-filter:blur(8px)}
+.view-btn:hover{border-color:#3F3F46;background:#1A1A1C}
+#cv3d{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
+.cam-hint{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);z-index:6;padding:6px 12px;border-radius:999px;background:rgba(20,20,22,.78);border:1px solid #27272A;color:#A1A1AA;font:600 11px Inter,system-ui,sans-serif;pointer-events:none;backdrop-filter:blur(8px);white-space:nowrap}
+@media (max-width:600px){
+  .cam-hint{bottom:12px;font-size:10px;padding:5px 10px}
+  .view-btn{height:26px;padding:0 8px;font-size:9px}
+}

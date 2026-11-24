@@ -63,6 +63,11 @@
     freezeWorld: false,
     rec: null,
     onCaptureFrame: null,
+    viewMode: (function () {
+      try { return localStorage.getItem('devameer-flow-view') === '2d' ? '2d' : '3d'; }
+      catch { return '3d'; }
+    })(),
+    worldListeners: [],
   };
 
   const clock = {
@@ -654,6 +659,11 @@
       if (state.activity.length > 20) state.activity.shift();
       state.focus.at = nowTs;
     }
+    if (!silent) {
+      for (const fn of state.worldListeners) {
+        try { fn(ev); } catch (e) { console.warn(e); }
+      }
+    }
   }
 
   function setStatus(s) {
@@ -1022,7 +1032,7 @@
       stepWorld(dt, now);
       updateCamera(dt, now);
     }
-    draw(now, dt);
+    if (state.viewMode !== '3d') draw(now, dt);
     if (typeof state.onCaptureFrame === 'function') {
       try { state.onCaptureFrame(now, dt); } catch (e) { console.warn(e); }
     }
@@ -1039,6 +1049,9 @@
     canvas._dpr = dpr;
     computeFit();
     if (state.cam.auto) { state.cam.tx = state.fit.x; state.cam.ty = state.fit.y; state.cam.tk = state.fit.k; }
+    if (state.viewMode === '3d' && window.DevameerOffice && window.DevameerOffice.resize) {
+      try { window.DevameerOffice.resize(); } catch (e) { console.warn(e); }
+    }
   }
 
   function showTip(n, sx, sy) {
@@ -1075,6 +1088,7 @@
     if (!wrap || wrap._bound) return;
     wrap._bound = true;
     wrap.addEventListener('pointerdown', (e) => {
+      if (state.viewMode === '3d') return;
       if (e.button !== 0) return;
       wrap.setPointerCapture(e.pointerId);
       state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1090,6 +1104,7 @@
       }
     });
     wrap.addEventListener('pointermove', (e) => {
+      if (state.viewMode === '3d') return;
       if (state.pointers.has(e.pointerId)) state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (state.pinch && state.pointers.size === 2) {
         const [a, b] = [...state.pointers.values()];
@@ -1118,18 +1133,33 @@
     wrap.addEventListener('pointercancel', up);
     wrap.addEventListener('pointerleave', () => hideTip());
     wrap.addEventListener('wheel', (e) => {
+      if (state.viewMode === '3d') return;
       e.preventDefault();
       zoomAt(e.clientX, e.clientY, state.cam.k * (e.deltaY > 0 ? 0.92 : 1.08));
       markUser();
     }, { passive: false });
     let lastTap = 0;
-    wrap.addEventListener('dblclick', (e) => { e.preventDefault(); goFit(false); state.cam.userAt = 0; state.cam.auto = true; });
+    wrap.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      if (state.viewMode === '3d') {
+        if (window.DevameerOffice && window.DevameerOffice.defaultCamera) window.DevameerOffice.defaultCamera();
+        return;
+      }
+      goFit(false); state.cam.userAt = 0; state.cam.auto = true;
+    });
     wrap.addEventListener('pointerup', (e) => {
+      if (state.viewMode === '3d') return;
       const t = performance.now();
       if (t - lastTap < 320) { goFit(false); state.cam.userAt = 0; state.cam.auto = true; }
       lastTap = t;
     });
     window.addEventListener('resize', () => { if (state.open) resize(); });
+    const viewBtn = $('#viewToggle');
+    if (viewBtn && !viewBtn._bound) {
+      viewBtn._bound = true;
+      viewBtn.addEventListener('click', () => setViewMode(state.viewMode === '3d' ? '2d' : '3d'));
+    }
+    updateViewToggle();
   }
   function zoomAt(cx, cy, k) {
     const wrap = $('#wrap').getBoundingClientRect();
@@ -1206,10 +1236,12 @@
       goFit(true);
       connectSSE();
     }
+    applyPreferredView();
     if (!state.raf) { tick._last = 0; state.raf = requestAnimationFrame(tick); }
   }
   function close() {
     state.open = false;
+    if (window.DevameerOffice) { try { window.DevameerOffice.setActive(false); } catch {} }
     if (state.sse) { try { state.sse.close(); } catch {} state.sse = null; }
     if (state.raf) { cancelAnimationFrame(state.raf); state.raf = 0; }
     setLive(false);
@@ -1240,6 +1272,9 @@
   function drawCapture(now, dt) {
     if (!state.rec) return null;
     const rec = state.rec;
+    if (state.viewMode === '3d' && window.DevameerOffice && window.DevameerOffice.renderCapture) {
+      return window.DevameerOffice.renderCapture(rec.canvas, rec.W, rec.H, now, dt);
+    }
     rec.fit = computeFit(rec.W, rec.H);
     updateCamera(dt || 0.033, now, rec.cam, rec.W, rec.H, rec.fit);
     draw(now, 0, { canvas: rec.canvas, cam: rec.cam, dpr: 1, watermark: true });
@@ -1248,8 +1283,74 @@
 
   function endCapture() {
     state.onCaptureFrame = null;
+    if (window.DevameerOffice && window.DevameerOffice.endCapture) {
+      try { window.DevameerOffice.endCapture(); } catch {}
+    }
     if (state.rec && state.rec.canvas && state.rec.canvas.parentNode) {
       try { state.rec.canvas.width = 1; state.rec.canvas.height = 1; } catch {}
+    }
+  }
+
+  function world() {
+    return {
+      nodes: state.nodes,
+      edges: state.edges,
+      screens: state.screens,
+      stats: state.stats,
+      lastEv: state.lastEv,
+      status: state.status,
+      pulse: state.pulse,
+      heat: state.heat,
+    };
+  }
+
+  function agentModeOf(id, now) {
+    const n = nodeById(id);
+    if (!n) return 'idle';
+    return agentMode(n, now == null ? clock.now() : now);
+  }
+
+  function updateViewToggle() {
+    const btn = $('#viewToggle');
+    const hint = $('#camHint');
+    if (btn) {
+      const is3d = state.viewMode === '3d';
+      btn.textContent = is3d ? '2D cards' : '3D office';
+      btn.setAttribute('aria-label', is3d ? 'Switch to 2D cards' : 'Switch to 3D office');
+    }
+    if (hint) hint.classList.toggle('hidden', state.viewMode !== '3d');
+  }
+
+  function setViewMode(mode) {
+    const want = mode === '2d' ? '2d' : '3d';
+    if (want === '3d') {
+      const Office = window.DevameerOffice;
+      if (!Office || !Office.setActive(true)) {
+        // Keep 3d preference; stay on 2D until the office module is ready (or WebGL fails).
+        if (Office) {
+          state.viewMode = '2d';
+          try { localStorage.setItem('devameer-flow-view', '2d'); } catch {}
+        }
+        updateViewToggle();
+        return false;
+      }
+      state.viewMode = '3d';
+    } else {
+      if (window.DevameerOffice) { try { window.DevameerOffice.setActive(false); } catch {} }
+      state.viewMode = '2d';
+    }
+    try { localStorage.setItem('devameer-flow-view', state.viewMode); } catch {}
+    updateViewToggle();
+    return true;
+  }
+
+  function applyPreferredView() {
+    const want = state.viewMode || '3d';
+    if (want === '3d') {
+      if (window.DevameerOffice) setViewMode('3d');
+      else updateViewToggle();
+    } else {
+      setViewMode('2d');
     }
   }
 
@@ -1347,7 +1448,9 @@
     open, close, resize, fit: () => goFit(false), setStatus,
     aspectSize, ensureRecCanvas, drawCapture, endCapture, stepWorld,
     onEvent, seedSilent, clearMotion, snapWorld, restoreWorld, playEvents,
-    clock,
+    clock, world, agentModeOf, setViewMode, applyPreferredView,
+    onWorldEvent(fn) { if (typeof fn === 'function') state.worldListeners.push(fn); },
+    get viewMode() { return state.viewMode; },
     get holdLive() { return state.holdLive; },
     set holdLive(v) { state.holdLive = !!v; },
     get freezeWorld() { return state.freezeWorld; },
