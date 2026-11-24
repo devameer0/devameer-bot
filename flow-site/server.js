@@ -283,9 +283,12 @@ const ASSET_MAP = {
 };
 function sendAsset(req, res, filePath, type) {
   if (!filePath || !fs.existsSync(filePath)) return false;
-  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  let buf;
+  try { buf = fs.readFileSync(filePath); }
+  catch { return false; }
   if (type) res.type(type);
-  res.sendFile(path.resolve(filePath));
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.end(buf);
   return true;
 }
 app.get('/office3d.bundle.js', (req, res, next) => {
@@ -296,14 +299,16 @@ app.get('/office3d.bundle.js', (req, res, next) => {
 ['/pipeline.js', '/record.js', '/site.js', '/pipeline.css'].forEach((route) => {
   app.get(route, (req, res, next) => {
     const type = route.endsWith('.css') ? 'text/css' : 'application/javascript';
-    if (sendAsset(req, res, ASSET_MAP[route] && ASSET_MAP[route](), type)) return;
+    const cached = ASSET_MAP[route] && ASSET_MAP[route]();
+    if (sendAsset(req, res, cached, type)) return;
+    if (sendAsset(req, res, path.join(pub, route.slice(1)), type)) return;
     next();
   });
 });
 
 function serveIndex(req, res) {
   let html = fs.readFileSync(path.join(pub, 'index.html'), 'utf8');
-  const v = (bundled && bundled.stamp) || String(Date.now());
+  const v = 'r2-' + ((bundled && bundled.stamp) || String(Date.now()));
   html = html.replace(/(href|src)="(\/(?:pipeline\.(?:css|js)|record\.js|site\.js|office3d\.bundle\.js))"/g, '$1="$2?v=' + v + '"');
   html = html.replace(/href="\/office3d\.bundle\.js"/g, 'href="/office3d.bundle.js?v=' + v + '"');
   res.setHeader('Cache-Control', 'no-cache');
